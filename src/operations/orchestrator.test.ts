@@ -47,6 +47,7 @@ describe('operations security boundary', () => {
   it('executes only after approval and records the transaction hash', async () => {
     const execute = vi.fn<PaymentExecutor['execute']>().mockResolvedValue({
       status: 'SUCCEEDED',
+      mode: 'TESTNET',
       transactionHash: 'ABC123',
       destination: 'rProtectedVendorTestnet',
       amount: 129,

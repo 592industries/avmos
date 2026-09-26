@@ -9,6 +9,7 @@ import {
 import type { ApprovedPaymentRequest, ExecutionResult } from '../domain/operations'
 
 export interface PaymentExecutor {
+  readonly mode?: 'SIMULATED' | 'TESTNET'
   execute(request: ApprovedPaymentRequest, signal?: AbortSignal): Promise<ExecutionResult>
 }
 
@@ -115,6 +116,7 @@ export class TransactionVerifier {
 }
 
 export class XrplPaymentExecutor implements PaymentExecutor {
+  readonly mode = 'TESTNET' as const
   private readonly client: XrplClient
   private readonly wallet: XrplWallet
   private readonly verifier: TransactionVerifier
@@ -154,6 +156,7 @@ export class XrplPaymentExecutor implements PaymentExecutor {
     }
     return {
       status: 'SUCCEEDED',
+      mode: 'TESTNET',
       transactionHash: submitted,
       destination,
       amount: request.amount,
@@ -165,12 +168,14 @@ export class XrplPaymentExecutor implements PaymentExecutor {
 }
 
 export class SimulatedPaymentExecutor implements PaymentExecutor {
+  readonly mode = 'SIMULATED' as const
   calls = 0
 
   async execute(request: ApprovedPaymentRequest): Promise<ExecutionResult> {
     this.calls += 1
     return {
       status: 'SUCCEEDED',
+      mode: 'SIMULATED',
       transactionHash: `SIMULATED-${crypto.randomUUID()}`,
       destination: request.destination,
       amount: request.amount,

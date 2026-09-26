@@ -17,6 +17,9 @@ type ResourceData = {
   hostname: string
   status: string
   telemetryStatus: string
+  telemetrySource: 'librenms' | 'demo'
+  historicalStatus: string
+  historicalSource: 'timescale' | 'demo'
   metrics: { storageUtilization?: number }
   lastObservedAt: string
 }
@@ -32,7 +35,7 @@ type ActionData = {
   actionIntent: { amount?: number; currency?: string; vendor?: string }
   policyDecision: { decision?: 'APPROVED' | 'DENIED'; reason?: string }
   executionStatus: string
-  execution?: { transactionHash?: string }
+  execution?: { transactionHash?: string; mode?: 'SIMULATED' | 'TESTNET' }
   createdAt: string
 }
 type AuditData = {
@@ -127,9 +130,9 @@ export default function HomePage() {
       <main className="mx-auto max-w-[1500px] space-y-5 px-5 py-6 lg:px-8">
         <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <StatusCard label="Agent" value={latestAction ? 'ONLINE' : 'READY'} icon={Bot} />
-          <StatusCard label="LibreNMS" value={resource?.telemetryStatus ?? 'DEMO READY'} icon={Activity} />
-          <StatusCard label="Historical" value={resource ? 'CONNECTED' : 'DEMO READY'} icon={HardDrive} />
-          <StatusCard label="XRPL Testnet" value={latestAction?.executionStatus === 'SUCCEEDED' ? 'VERIFIED' : 'READY'} icon={CircleDollarSign} />
+          <StatusCard label="LibreNMS" value={resource ? (resource.telemetrySource === 'librenms' ? resource.telemetryStatus : 'DEMO') : 'DEMO READY'} icon={Activity} />
+          <StatusCard label="Historical" value={resource ? (resource.historicalSource === 'timescale' ? resource.historicalStatus : 'DEMO') : 'DEMO READY'} icon={HardDrive} />
+          <StatusCard label="XRPL Testnet" value={latestAction?.executionStatus === 'SUCCEEDED' ? (latestAction.execution?.mode === 'TESTNET' ? 'VERIFIED' : 'SIMULATED') : 'READY'} icon={CircleDollarSign} />
           <StatusCard label="Policy" value={policy?.enabled ? 'ACTIVE' : 'READY'} icon={ShieldCheck} />
         </section>
 

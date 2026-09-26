@@ -123,6 +123,7 @@ export type AuditEvent = {
 
 export type ExecutionResult = {
   status: 'SUCCEEDED' | 'FAILED'
+  mode: 'SIMULATED' | 'TESTNET'
   transactionHash?: string
   destination: string
   amount: number

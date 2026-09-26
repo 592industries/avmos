@@ -1,5 +1,5 @@
 import type { ActionTools } from 'deepspace/worker'
-import type { AuditEvent, InfrastructureResource } from '../domain/operations'
+import type { AuditEvent, InfrastructureResource, TelemetryTrend } from '../domain/operations'
 import type { OperationAction, OperationsStore } from './orchestrator'
 
 type RecordEnvelope<T> = {
@@ -11,7 +11,7 @@ type RecordEnvelope<T> = {
 export class DeepSpaceOperationsStore implements OperationsStore {
   constructor(private readonly tools: ActionTools) {}
 
-  async recordResource(resource: InfrastructureResource): Promise<void> {
+  async recordResource(resource: InfrastructureResource, trend: TelemetryTrend): Promise<void> {
     await expectSuccess(
       this.tools.create(
         'resources',
@@ -20,6 +20,9 @@ export class DeepSpaceOperationsStore implements OperationsStore {
           type: resource.type,
           status: resource.status,
           telemetryStatus: 'CONNECTED',
+          telemetrySource: resource.source,
+          historicalStatus: 'CONNECTED',
+          historicalSource: trend.source,
           storageUtilization: resource.metrics.storageUtilization / 100,
           metrics: resource.metrics,
           alerts: resource.alerts,

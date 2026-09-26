@@ -26,7 +26,7 @@ export type OperationAction = {
 }
 
 export interface OperationsStore {
-  recordResource(resource: InfrastructureResource): Promise<void>
+  recordResource(resource: InfrastructureResource, trend: TelemetryTrend): Promise<void>
   recordAgentRun(agent: {
     id: string
     name: string
@@ -60,7 +60,7 @@ export class OperationsOrchestrator {
   async run(resourceId: string, signal?: AbortSignal): Promise<OperationResult> {
     const resource = await this.telemetry.getResource(resourceId, signal)
     const trend = await this.history.getStorageTrend(resourceId, signal)
-    await this.store.recordResource(resource)
+    await this.store.recordResource(resource, trend)
     await this.audit('OBSERVATION', 'telemetry', 'pending', resource.id, {
       resource,
       trend,
@@ -145,6 +145,7 @@ export class OperationsOrchestrator {
     } catch (error) {
       const execution: ExecutionResult = {
         status: 'FAILED',
+        mode: this.executor.mode ?? 'SIMULATED',
         destination: payment.destination,
         amount: payment.amount,
         currency: payment.currency,
