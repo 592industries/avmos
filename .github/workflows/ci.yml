@@ -1,0 +1,73 @@
+name: Agent-Monitor CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-monitor-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run type-check
+      - run: npm run test:unit
+      - run: npm run build
+
+  deepspace-test:
+    needs: verify
+    runs-on: ubuntu-latest
+    env:
+      DEEPSPACE_SESSION: ${{ secrets.DEEPSPACE_SESSION }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Install DeepSpace session
+        if: ${{ env.DEEPSPACE_SESSION != '' }}
+        shell: bash
+        run: |
+          install -d -m 700 "$HOME/.deepspace"
+          printf '%s' "$DEEPSPACE_SESSION" > "$HOME/.deepspace/session"
+          chmod 600 "$HOME/.deepspace/session"
+      - if: ${{ env.DEEPSPACE_SESSION != '' }}
+        run: npm test
+
+  deploy:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    needs: [verify, deepspace-test]
+    environment: production
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Install DeepSpace session
+        shell: bash
+        env:
+          DEEPSPACE_SESSION: ${{ secrets.DEEPSPACE_SESSION }}
+        run: |
+          install -d -m 700 "$HOME/.deepspace"
+          printf '%s' "$DEEPSPACE_SESSION" > "$HOME/.deepspace/session"
+          chmod 600 "$HOME/.deepspace/session"
+      - run: npx deepspace deploy --json
