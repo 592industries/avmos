@@ -125,7 +125,6 @@ export function registerAdminRoutes(app: Hono<AppContext>, resolveAuth: ResolveA
     const id = integrationId(workspace.workspaceId, provider.id)
     const prior = await tools.get<Record<string, unknown>>('integration-config', id)
     if (Object.keys(parsed.data.secrets).length) {
-      if (!c.env.WORKSPACE_CREDENTIAL_KEY) return apiError('CREDENTIAL_STORE_UNAVAILABLE', 'Secure workspace credential storage is not configured.', 503)
       await writeCredential(c.env, workspace.workspaceId, provider.id, parsed.data.secrets)
     }
     const result = await tools.create('integration-config', {
@@ -158,14 +157,13 @@ export function registerAdminRoutes(app: Hono<AppContext>, resolveAuth: ResolveA
     const workspace = await workspaceAccess(c.req.raw, tools, access.auth.userId)
     if (workspace instanceof Response) return workspace
     const id = integrationId(workspace.workspaceId, provider.id)
-    const storedSecrets = c.env.WORKSPACE_CREDENTIAL_KEY ? await readCredential(c.env, workspace.workspaceId, provider.id) : null
+    const storedSecrets = await readCredential(c.env, workspace.workspaceId, provider.id).catch(() => null)
     const effectiveSecrets = { ...storedSecrets, ...parsed.data.secrets }
     await audit(tools, c.env, workspace.workspaceId, access.auth.userId, 'INTEGRATION_TEST_STARTED', id, { providerId: provider.id })
     const testedAt = new Date().toISOString()
     try {
       const outcome = await testProvider(provider.id, c.env, parsed.data.values, effectiveSecrets, workspace.workspaceId)
       if (Object.keys(parsed.data.secrets).length) {
-        if (!c.env.WORKSPACE_CREDENTIAL_KEY) return apiError('CREDENTIAL_STORE_UNAVAILABLE', 'Secure workspace credential storage is not configured.', 503)
         await writeCredential(c.env, workspace.workspaceId, provider.id, parsed.data.secrets)
       }
       await tools.create('integration-config', {
@@ -202,7 +200,7 @@ export function registerAdminRoutes(app: Hono<AppContext>, resolveAuth: ResolveA
     const id = integrationId(workspace.workspaceId, provider.id)
     const removed = await tools.remove('integration-config', id)
     if (!removed.success && removed.code !== 'not_found') return apiError('STORE_ERROR', 'Configuration could not be cleared.', 503)
-    if (c.env.WORKSPACE_CREDENTIAL_KEY) await removeCredential(c.env, workspace.workspaceId, provider.id)
+    await removeCredential(c.env, workspace.workspaceId, provider.id).catch(() => undefined)
     await audit(tools, c.env, workspace.workspaceId, access.auth.userId, 'INTEGRATION_CONFIG_CLEARED', id, { providerId: provider.id })
     return c.json({ success: true, message: 'Workspace integration configuration and stored credential cleared.' })
   })

@@ -1,10 +1,23 @@
 const PREFIX = 'avmos:workspace-credential:'
+const APP_DERIVED_PREFIX = 'avmos-workspace-credential-v1:'
 
 type StoredCredential = {
   version: 1
   iv: string
   ciphertext: string
   updatedAt: string
+}
+
+/** Prefer an explicit secret; otherwise derive a stable app-scoped root from DEEPSPACE_APP_ID. */
+export function resolveWorkspaceCredentialKey(env: {
+  WORKSPACE_CREDENTIAL_KEY?: string
+  DEEPSPACE_APP_ID: string
+}): string {
+  const configured = env.WORKSPACE_CREDENTIAL_KEY?.trim()
+  if (configured && configured.length >= 24) return configured
+  const derived = `${APP_DERIVED_PREFIX}${env.DEEPSPACE_APP_ID}`
+  if (derived.length < 24) throw new Error('Workspace credential encryption is not configured.')
+  return derived
 }
 
 export async function storeWorkspaceCredential(

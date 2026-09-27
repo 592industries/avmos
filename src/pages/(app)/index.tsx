@@ -10,7 +10,7 @@ export default function LandingPage() {
     <section className="mission-hero">
       <div>
         <p className="landing-section-label">AVMOS / AUTONOMOUS VERIFICATION, MONITORING &amp; OPERATIONS SYSTEM</p>
-        <h1>Infrastructure that can observe, verify, and act — safely.</h1>
+        <h1>Autonomous Verification, Monitoring &amp; Operations System</h1>
         <p>AVMOS turns live infrastructure telemetry into governed operational action, with deterministic policy between AI reasoning and execution.</p>
         <div className="landing-actions">
           <Link className="landing-primary" to={consoleHref}>OPEN CONSOLE <ArrowRight size={16}/></Link>

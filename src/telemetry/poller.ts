@@ -84,9 +84,7 @@ async function pollWorkspace(
     updatedAt: now,
   })
   try {
-    const stored = env.WORKSPACE_CREDENTIAL_KEY
-      ? await readCredential(env, configuration.workspaceId, 'newrelic')
-      : null
+    const stored = await readCredential(env, configuration.workspaceId, 'newrelic').catch(() => null)
     const resolved = resolveNewRelicPollCredentials(configuration, stored, env)
     const userKey = resolved.userKey
     const accountId = resolved.accountId

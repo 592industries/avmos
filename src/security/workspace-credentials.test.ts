@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { deleteWorkspaceCredential, readWorkspaceCredential, storeWorkspaceCredential } from './workspace-credentials'
+import { deleteWorkspaceCredential, readWorkspaceCredential, resolveWorkspaceCredentialKey, storeWorkspaceCredential } from './workspace-credentials'
 
 function memoryStorage(): DurableObjectStorage {
   const data = new Map<string, unknown>()
@@ -29,5 +29,13 @@ describe('workspace credential store', () => {
     await deleteWorkspaceCredential(storage, 'workspace-a', 'newrelic')
     expect(await readWorkspaceCredential(storage, 'workspace-credential-root-secret', 'workspace-a', 'newrelic')).toBeNull()
     expect(await readWorkspaceCredential(storage, 'workspace-credential-root-secret', 'workspace-b', 'newrelic')).toEqual({ userKey: 'tenant-b' })
+  })
+
+  it('derives a stable app-scoped key when WORKSPACE_CREDENTIAL_KEY is unset', async () => {
+    expect(resolveWorkspaceCredentialKey({ DEEPSPACE_APP_ID: 'app_01M3FSEF0RC4H3BFSYABBGAGRP' })).toMatch(/^avmos-workspace-credential-v1:app_/)
+    expect(resolveWorkspaceCredentialKey({
+      WORKSPACE_CREDENTIAL_KEY: 'explicit-workspace-credential-root',
+      DEEPSPACE_APP_ID: 'app_01M3FSEF0RC4H3BFSYABBGAGRP',
+    })).toBe('explicit-workspace-credential-root')
   })
 })

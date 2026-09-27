@@ -34,7 +34,7 @@ import {
 } from './src/server/http-routes.js'
 import { registerRealtimeRoutes } from './src/server/realtime-routes.js'
 import { acquirePollLease, allowRequest, lookupOperation, releasePollLease, reserveOperation, transitionOperation } from './src/operations/guard.js'
-import { deleteWorkspaceCredential, readWorkspaceCredential, storeWorkspaceCredential } from './src/security/workspace-credentials.js'
+import { deleteWorkspaceCredential, readWorkspaceCredential, resolveWorkspaceCredentialKey, storeWorkspaceCredential } from './src/security/workspace-credentials.js'
 
 // Dynamic deploy reads this manifest to create the app's DO bindings.
 export const __DO_MANIFEST__ = [
@@ -61,15 +61,13 @@ export class AppRecordRoom extends RecordRoom<Env> {
           providerId: string
           secrets?: Record<string, string>
         }
-        if (!this.env.WORKSPACE_CREDENTIAL_KEY) {
-          return Response.json({ error: 'Workspace credential storage is not configured.' }, { status: 503 })
-        }
+        const encryptionKey = resolveWorkspaceCredentialKey(this.env)
         if (body.action === 'store') {
-          await storeWorkspaceCredential(this.operationState.storage, this.env.WORKSPACE_CREDENTIAL_KEY, body.workspaceId, body.providerId, body.secrets ?? {})
+          await storeWorkspaceCredential(this.operationState.storage, encryptionKey, body.workspaceId, body.providerId, body.secrets ?? {})
           return Response.json({ stored: true })
         }
         if (body.action === 'read') {
-          const secrets = await readWorkspaceCredential(this.operationState.storage, this.env.WORKSPACE_CREDENTIAL_KEY, body.workspaceId, body.providerId)
+          const secrets = await readWorkspaceCredential(this.operationState.storage, encryptionKey, body.workspaceId, body.providerId)
           return Response.json({ secrets })
         }
         if (body.action === 'delete') {
