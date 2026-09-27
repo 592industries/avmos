@@ -7,6 +7,7 @@ import {
   type Policy,
   type PolicyDecision,
   type TelemetryTrend,
+  type SettlementState,
 } from '../domain/operations'
 import { evaluatePolicy } from '../policy/engine'
 import type { TelemetrySource } from '../telemetry/newrelic'
@@ -21,7 +22,7 @@ export type OperationAction = {
   reasoning: string
   decisionSummary?: string
   policyDecision: PolicyDecision
-  executionStatus: 'NOT_STARTED' | 'DENIED' | 'RESERVED' | 'EXECUTING' | 'SUCCEEDED' | 'FAILED' | 'UNKNOWN'
+  executionStatus: SettlementState
   providerId?: string
   policyId?: string
   policyHash?: string
@@ -47,7 +48,7 @@ export interface OperationsStore {
   appendAudit(event: AuditEvent): Promise<void>
   spentToday(): Promise<number>
   reserve(request: ReserveRequest): Promise<ReserveResult>
-  transition(operationId: string, state: 'EXECUTING' | 'SUCCEEDED' | 'FAILED' | 'UNKNOWN'): Promise<void>
+  transition(operationId: string, state: SettlementState): Promise<void>
   getAction(operationId: string): Promise<OperationAction | null>
 }
 
@@ -127,7 +128,7 @@ export class OperationsOrchestrator {
       reasoning: proposal.reasoning,
       decisionSummary,
       policyDecision: decision,
-      executionStatus: decision.decision === 'DENIED' ? 'DENIED' : 'NOT_STARTED',
+      executionStatus: decision.decision === 'DENIED' ? 'POLICY_DENIED' : 'POLICY_APPROVED',
       policyId: this.policy.id,
       policyHash,
       policySnapshot: structuredClone(this.policy),
@@ -137,6 +138,7 @@ export class OperationsOrchestrator {
       createdAt: new Date().toISOString(),
     }
     await this.store.recordPolicyDecision(action)
+    await this.store.recordAction(action)
 
     if (decision.decision === 'DENIED') {
       await this.audit('POLICY_DENIED', 'deterministic-policy-engine', actionId, resource.id, { reason: decision.reason, checks: decision.checks }, decision.policyVersion)
@@ -160,13 +162,13 @@ export class OperationsOrchestrator {
         if (previous) return { resource, trend, action: previous }
       }
       action.policyDecision = { ...decision, decision: 'DENIED', reason: reservation.code, checks: [...decision.checks, { name: reservation.code.toLowerCase(), passed: false, detail: reservation.code }] }
-      action.executionStatus = 'DENIED'
+      action.executionStatus = 'POLICY_DENIED'
       await this.audit('DENIED', 'operation-guard', actionId, resource.id, { reason: reservation.code, previousOperationId: reservation.operationId })
       action.auditStatus = 'COMPLETE'
       await this.store.recordAction(action)
       return { resource, trend, action }
     }
-    action.executionStatus = 'RESERVED'
+    action.executionStatus = 'BUDGET_RESERVED'
     await this.store.recordAction(action)
     await this.audit('BUDGET_RESERVED', 'operation-guard', actionId, resource.id, { amount: proposal.intent.amount, policyHash }, decision.policyVersion)
     await this.audit('APPROVED', 'deterministic-policy-engine', actionId, resource.id, { reason: decision.reason, checks: decision.checks }, decision.policyVersion)
@@ -178,8 +180,8 @@ export class OperationsOrchestrator {
       this.vendorDestinations,
       this.executor.providerId ?? 'xrpl-testnet',
     )
-    await this.store.transition(actionId, 'EXECUTING')
-    action.executionStatus = 'EXECUTING'
+    await this.store.transition(actionId, 'EXECUTION_PENDING')
+    action.executionStatus = 'EXECUTION_PENDING'
     await this.store.recordAction(action)
     await this.audit('EXECUTION_STARTED', 'protected-xrpl-executor', actionId, resource.id, {
       destination: payment.destination,
@@ -188,7 +190,11 @@ export class OperationsOrchestrator {
     })
     let execution: ExecutionResult
     try {
-      execution = await this.executor.execute(payment, signal)
+      execution = await this.executor.execute(payment, signal, async (state) => {
+        await this.store.transition(actionId, state)
+        action.executionStatus = state
+        await this.store.recordAction(action)
+      })
     } catch (error) {
       // A throw after submission cannot prove that the ledger rejected it.
       // Keep the reservation and require reconciliation before any retry.
@@ -204,8 +210,9 @@ export class OperationsOrchestrator {
       }
     }
     action.execution = execution
-    action.executionStatus = execution.status
+    action.executionStatus = execution.status === 'UNKNOWN' ? 'RECONCILIATION_REQUIRED' : execution.status
     await this.store.transition(actionId, execution.status)
+    if (execution.status === 'UNKNOWN') await this.store.transition(actionId, 'RECONCILIATION_REQUIRED')
     await this.store.recordAction(action)
     try {
       await this.audit(

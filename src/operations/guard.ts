@@ -11,7 +11,7 @@ export type ReserveRequest = {
 
 type Reservation = ReserveRequest & {
   day: string
-  state: 'RESERVED' | 'EXECUTING' | 'SUCCEEDED' | 'FAILED' | 'UNKNOWN'
+  state: 'BUDGET_RESERVED' | 'EXECUTION_PENDING' | 'SUBMITTED' | 'VALIDATING' | 'SUCCEEDED' | 'FAILED' | 'UNKNOWN' | 'RECONCILIATION_REQUIRED'
   createdAt: number
   expiresAt: number | null
 }
@@ -87,7 +87,7 @@ export async function reserveOperation(storage: DurableObjectStorage, request: R
       if (reservation.day === day && reservation.state !== 'FAILED') reservedToday += reservation.amount
     }
     if (reservedToday + request.amount > request.dailyBudget) return { allowed: false, code: 'BUDGET_EXCEEDED' }
-    const row: Reservation = { ...request, day, state: 'RESERVED', createdAt: now, expiresAt: now + DAY_MS }
+    const row: Reservation = { ...request, day, state: 'BUDGET_RESERVED', createdAt: now, expiresAt: now + DAY_MS }
     await tx.put(PREFIX + request.operationId, row)
     await tx.put(KEY_PREFIX + request.idempotencyKey, { operationId: request.operationId, requestHash: request.requestHash })
     return { allowed: true, operationId: request.operationId }
@@ -100,13 +100,16 @@ export async function transitionOperation(storage: DurableObjectStorage, operati
     const row = await tx.get<Reservation>(key)
     if (!row) throw new Error('Operation reservation not found.')
     const allowed: Record<Reservation['state'], Reservation['state'][]> = {
-      RESERVED: ['EXECUTING', 'FAILED'],
-      EXECUTING: ['SUCCEEDED', 'FAILED', 'UNKNOWN'],
-      UNKNOWN: ['SUCCEEDED', 'FAILED'],
+      BUDGET_RESERVED: ['EXECUTION_PENDING', 'FAILED'],
+      EXECUTION_PENDING: ['SUBMITTED', 'FAILED', 'UNKNOWN'],
+      SUBMITTED: ['VALIDATING', 'FAILED', 'UNKNOWN'],
+      VALIDATING: ['SUCCEEDED', 'FAILED', 'UNKNOWN'],
+      UNKNOWN: ['RECONCILIATION_REQUIRED', 'SUCCEEDED', 'FAILED'],
+      RECONCILIATION_REQUIRED: ['SUCCEEDED', 'FAILED'],
       SUCCEEDED: [],
       FAILED: [],
     }
     if (!allowed[row.state].includes(state)) throw new Error(`Illegal execution transition: ${row.state} to ${state}.`)
-    await tx.put(key, { ...row, state, expiresAt: state === 'UNKNOWN' || state === 'EXECUTING' ? null : state === 'FAILED' ? now : state === 'SUCCEEDED' ? now + DAY_MS : row.expiresAt })
+    await tx.put(key, { ...row, state, expiresAt: ['EXECUTION_PENDING', 'SUBMITTED', 'VALIDATING', 'UNKNOWN', 'RECONCILIATION_REQUIRED'].includes(state) ? null : state === 'FAILED' ? now : state === 'SUCCEEDED' ? now + DAY_MS : row.expiresAt })
   })
 }

@@ -57,7 +57,7 @@ export class AppRecordRoom extends RecordRoom<Env> {
     }
     if (path === '/internal/avmos/transition' && request.method === 'POST') {
       try {
-        const body = await request.json() as { operationId: string; state: 'RESERVED' | 'EXECUTING' | 'SUCCEEDED' | 'FAILED' | 'UNKNOWN' }
+        const body = await request.json() as { operationId: string; state: 'BUDGET_RESERVED' | 'EXECUTION_PENDING' | 'SUBMITTED' | 'VALIDATING' | 'SUCCEEDED' | 'FAILED' | 'UNKNOWN' | 'RECONCILIATION_REQUIRED' }
         await transitionOperation(this.operationState.storage, body.operationId, body.state)
         return Response.json({ ok: true })
       } catch { return Response.json({ error: 'Invalid operation transition.' }, { status: 400 }) }

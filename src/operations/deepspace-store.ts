@@ -1,5 +1,5 @@
 import type { ActionTools } from 'deepspace/worker'
-import type { AuditEvent, InfrastructureResource, TelemetryObservation, TelemetryTrend } from '../domain/operations'
+import type { AuditEvent, InfrastructureResource, SettlementState, TelemetryObservation, TelemetryTrend } from '../domain/operations'
 import type { OperationAction, OperationsStore } from './orchestrator'
 import type { ReserveRequest, ReserveResult } from './guard'
 import type { Env } from '../../worker'
@@ -28,7 +28,7 @@ export class DeepSpaceOperationsStore implements OperationsStore {
     return response.json() as Promise<ReserveResult>
   }
 
-  async transition(operationId: string, state: 'EXECUTING' | 'SUCCEEDED' | 'FAILED' | 'UNKNOWN'): Promise<void> {
+  async transition(operationId: string, state: SettlementState): Promise<void> {
     const response = await this.guard('transition', { operationId, state })
     if (!response.ok) throw new Error('Operation transition unavailable.')
   }

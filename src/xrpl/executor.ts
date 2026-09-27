@@ -12,7 +12,7 @@ import type { ApprovedPaymentRequest, ExecutionResult } from '../domain/operatio
 export interface PaymentExecutor {
   readonly mode?: 'SIMULATED' | 'TESTNET'
   readonly providerId?: string
-  execute(request: ApprovedPaymentRequest, signal?: AbortSignal): Promise<ExecutionResult>
+  execute(request: ApprovedPaymentRequest, signal?: AbortSignal, transition?: (state: 'SUBMITTED' | 'VALIDATING') => Promise<void>): Promise<ExecutionResult>
 }
 export interface PaymentProvider extends PaymentExecutor {
   readonly providerId: string
@@ -153,7 +153,7 @@ export class XrplPaymentExecutor implements PaymentProvider {
     this.verifier = new TransactionVerifier(this.client)
   }
 
-  async execute(request: ApprovedPaymentRequest): Promise<ExecutionResult> {
+  async execute(request: ApprovedPaymentRequest, _signal?: AbortSignal, transition?: (state: 'SUBMITTED' | 'VALIDATING') => Promise<void>): Promise<ExecutionResult> {
     const destination = this.config.vendorDestinations[request.vendor]
     if (!destination || destination !== request.destination || !isValidClassicAddress(destination) || request.currency !== 'RLUSD' || !Number.isFinite(request.amount) || request.amount <= 0 || !request.actionId || !request.policyVersion || Number.isNaN(Date.parse(request.policyApprovedAt))) {
       throw new Error('Approved vendor destination is not configured.')
@@ -173,7 +173,7 @@ export class XrplPaymentExecutor implements PaymentProvider {
       const prepared = await client.autofill(transaction)
       const signed = this.wallet.wallet.sign(prepared)
       let result
-      try { result = await client.submitAndWait(signed.tx_blob) }
+      try { await transition?.('SUBMITTED'); result = await client.submitAndWait(signed.tx_blob); await transition?.('VALIDATING') }
       catch { throw new SubmissionUnknownError(signed.hash) }
       assertValidated(result)
       return signed.hash
@@ -206,8 +206,10 @@ export class SimulatedPaymentExecutor implements PaymentProvider {
   readonly supportedActions = ['purchase_storage'] as const
   calls = 0
 
-  async execute(request: ApprovedPaymentRequest): Promise<ExecutionResult> {
+  async execute(request: ApprovedPaymentRequest, _signal?: AbortSignal, transition?: (state: 'SUBMITTED' | 'VALIDATING') => Promise<void>): Promise<ExecutionResult> {
     this.calls += 1
+    await transition?.('SUBMITTED')
+    await transition?.('VALIDATING')
     return {
       status: 'SUCCEEDED',
       mode: 'SIMULATED',

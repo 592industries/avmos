@@ -36,10 +36,10 @@ describe('durable operation guard', () => {
   it('blocks equivalent remediation across keys and preserves unknown state', async () => {
     const storage = memoryStorage()
     expect((await reserveOperation(storage, request('a', 'same'))).allowed).toBe(true)
-    await transitionOperation(storage, 'a', 'EXECUTING')
+    await transitionOperation(storage, 'a', 'EXECUTION_PENDING')
     await transitionOperation(storage, 'a', 'UNKNOWN')
     expect(await reserveOperation(storage, request('b', 'same'), Date.now() + 86_400_000 * 2)).toEqual({ allowed: false, code: 'DUPLICATE_OPERATION', operationId: 'a' })
-    await expect(transitionOperation(storage, 'a', 'EXECUTING')).rejects.toThrow('Illegal execution transition')
+    await expect(transitionOperation(storage, 'a', 'EXECUTION_PENDING')).rejects.toThrow('Illegal execution transition')
   })
 
   it('detects a changed request under one idempotency key', async () => {
