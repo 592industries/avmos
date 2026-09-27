@@ -31,7 +31,7 @@ Use Node 24 and npm 11.6 or newer. Install with `npm ci`, authenticate with `npx
 
 Configure the names in [`.env.example`](./.env.example) through `npx deepspace secrets set KEY=value`. DeepSpace owns platform identity, JWT, owner, and app bindings. The integration screen reports and tests configuration but never returns or stores secret values in ordinary records. Never commit wallet seeds, user keys, JWTs, or `.dev.vars`.
 
-For a live operation, configure New Relic and Grok, ensure exactly one enabled authorization policy exists (or set `ACTIVE_POLICY_ID` to select an enabled policy), and set a valid Testnet vendor destination. Settle in simulated mode first. Enable XRPL live mode only after checking the account, RLUSD issuer and trust line, destination, policy, and reconciliation process. `AUTONOMOUS_RUNS_ENABLED=false`, `DEMO_MODE=false`, and `ALLOW_DEBUG_ROUTES=false` are the production defaults.
+For a live operation, configure New Relic and Grok, ensure exactly one enabled policy applies to the requested resource and operation (or set `ACTIVE_POLICY_ID` to select an applicable enabled policy), and set a valid Testnet vendor destination. Settle in simulated mode first. Enable XRPL live mode only after checking the account, RLUSD issuer and trust line, destination, policy, and reconciliation process. `AUTONOMOUS_RUNS_ENABLED=false`, `DEMO_MODE=false`, and `ALLOW_DEBUG_ROUTES=false` are the production defaults.
 
 ## Verification
 
