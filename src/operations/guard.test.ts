@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { lookupOperation, reserveOperation, transitionOperation, type ReserveRequest } from './guard'
+import { acquirePollLease, lookupOperation, releasePollLease, reserveOperation, transitionOperation, type ReserveRequest } from './guard'
 
 function memoryStorage(): DurableObjectStorage {
   const data = new Map<string, unknown>()
@@ -21,8 +21,8 @@ function memoryStorage(): DurableObjectStorage {
   } as unknown as DurableObjectStorage
 }
 
-function request(operationId: string, fingerprint = operationId, amount = 700): ReserveRequest {
-  return { operationId, idempotencyKey: operationId, requestHash: `hash-${operationId}`, fingerprint, amount, dailyBudget: 1000, currency: 'RLUSD' }
+function request(operationId: string, fingerprint = operationId, amount = 129): ReserveRequest {
+  return { operationId, idempotencyKey: operationId, requestHash: `hash-${operationId}`, fingerprint, amount, dailyBudget: 200, currency: 'RLUSD' }
 }
 
 describe('durable operation guard', () => {
@@ -48,5 +48,14 @@ describe('durable operation guard', () => {
     expect(await lookupOperation(storage, 'a', 'hash-a')).toEqual({ code: 'REPLAY', operationId: 'a' })
     expect(await lookupOperation(storage, 'a', 'changed')).toEqual({ code: 'IDEMPOTENCY_CONFLICT' })
     expect(await reserveOperation(storage, { ...request('b'), idempotencyKey: 'a', requestHash: 'changed' })).toEqual({ allowed: false, code: 'IDEMPOTENCY_CONFLICT' })
+  })
+
+  it('allows only one shared telemetry poll per minute', async () => {
+    const storage = memoryStorage()
+    const now = Date.now()
+    expect(await Promise.all([acquirePollLease(storage, 'a', now), acquirePollLease(storage, 'b', now)])).toEqual([true, false])
+    await releasePollLease(storage, 'a', now + 1000)
+    expect(await acquirePollLease(storage, 'b', now + 1000)).toBe(false)
+    expect(await acquirePollLease(storage, 'b', now + 60_001)).toBe(true)
   })
 })

@@ -1,9 +1,8 @@
 /**
  * Root shell — wraps every route, static and dynamic alike.
  *
- * This layout deliberately mounts NO DeepSpace providers, so a page placed at
- * the top level of src/pages/ (like index.tsx) renders as a plain static page:
- * no auth session fetch, no records WebSocket, no Durable Object connection.
+ * This layout deliberately mounts NO DeepSpace providers. The dashboard is
+ * nested under (app), which mounts auth and realtime providers.
  *
  * The auth + realtime data layer lives one level down, in (app)/_layout.tsx.
  * Any page that needs `useAuth`, `useQuery`, `useMutations`, etc. must live

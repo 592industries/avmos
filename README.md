@@ -9,16 +9,16 @@ AVMOS observes infrastructure, asks Grok to propose a response, applies determin
 Repeated infrastructure alerts can prompt duplicate or unsafe remediation payments. AVMOS uses New Relic as evidence, a policy engine as authority, a serialized DeepSpace Durable Object reservation as a budget and remediation guard, and a protected XRPL Testnet executor as the only signer.
 
 ```text
-New Relic StorageSample → normalized resource + historical trend → Grok proposal
+New Relic StorageSample → server poll → shared DeepSpace resource + historical trend → optional Tavily research → Grok proposal
   → validated intent → deterministic policy → atomic budget reservation
   → XRPL Testnet executor (or explicit simulation) → verification → DeepSpace audit
 ```
 
-The DeepSpace Worker provides authenticated actions, role checks, RecordRoom state, realtime subscriptions, CronRoom scheduling, and deployment. Both manual runs and scheduled runs call the same operation service. Tavily is optional research and has no authorization role.
+The DeepSpace Worker provides authenticated actions, role checks, RecordRoom state, realtime subscriptions, CronRoom scheduling, and deployment. The `/` route is the dashboard; `/home` redirects there. A minute CronRoom task pulls New Relic data once per app through a short Durable Object lease and writes the `avmos` resource to shared records. Browser tabs receive updates through DeepSpace realtime. Autonomous operation runs are a separate 15-minute task and remain disabled by default. Tavily runs only when the owner opts into external remediation research for a manual cycle; its outcome and source titles/URLs are audited, and it has no authorization role.
 
 ## Security and execution
 
-- Live runs require a New Relic user key, account, entity GUID, and a Grok key. Missing or stale evidence cannot authorize live spending. Demo fixtures are used only when `DEMO_MODE=true` and a demo action is explicitly selected.
+- Live runs require a New Relic user key, account, entity GUID, and a Grok key. Missing or stale evidence cannot authorize live spending. The `avmos` resource is the default target. The 75% warning, 80% action, and 90% critical thresholds apply to verified storage utilization. Demo fixtures are used only when `DEMO_MODE=true` and a demo action is explicitly selected.
 - Actions require verified bearer JWTs and application roles. Financial actions require the app owner and a UUID `Idempotency-Key`. The operator assistant has read-only tools.
 - An operation reservation serializes budget checks and blocks repeat remediation on the same resource, action, and vendor. Successful operations retain a 24-hour cooldown. An unknown XRPL outcome keeps its reservation until reconciliation.
 - The executor accepts an approved payment request, checks the configured vendor destination, and connects only to `wss://s.altnet.rippletest.net:51233`. It verifies the ledger result separately. `XRPL_EXECUTION_MODE=simulated` is the safe default.
@@ -36,8 +36,8 @@ For a live operation, configure New Relic and Grok, ensure exactly one enabled a
 
 Run `npm run lint`, `npm run type-check`, `npm run test:unit`, `npm test`, and `npm run build`. `npm test` uses the DeepSpace test runner and needs a valid DeepSpace session. CI runs validation before deploying pushes to `main`.
 
-The approved path observes live New Relic storage telemetry, computes a historical trend, validates Grok's proposal, reserves budget, and simulates or submits settlement. The rejection control is explicitly labeled as a demo and requires `DEMO_MODE=true`; its malicious proposal must be denied before the executor is called. The audit timeline reflects records as they arrive through DeepSpace realtime.
+The approved path observes live New Relic storage telemetry, computes a historical trend, validates Grok's proposal, reserves budget, and simulates or submits settlement. The demo approved control proposes 129 RLUSD; the demo rejection control proposes 700 RLUSD against the 250 RLUSD transaction limit and requires `DEMO_MODE=true`. Denial is audited as `POLICY_DENIED` before any executor call. The audit timeline reflects records as they arrive through DeepSpace realtime.
 
 ## Limits
 
-The exact `StorageSample` attribute set and entity mapping must be checked against the connected New Relic account. No live integration has been verified without operator credentials. Reconciliation of an `UNKNOWN` XRPL submission is manual; automatic retry is intentionally disabled. The current UI displays one configured infrastructure entity. See [architecture](./docs/architecture.md) and [threat model](./docs/threat-model.md).
+The exact `StorageSample` attribute set and entity mapping must be checked against the connected New Relic account. No live integration has been verified without operator credentials. Reconciliation of an `UNKNOWN` XRPL submission is manual; automatic retry is intentionally disabled. The current UI displays the `avmos` infrastructure entity. See [architecture](./docs/architecture.md) and [threat model](./docs/threat-model.md).

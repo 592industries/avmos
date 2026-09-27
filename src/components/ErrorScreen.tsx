@@ -107,6 +107,7 @@ export function ErrorScreen({ error, onReset }: ErrorScreenProps) {
       data-testid="ds-error-boundary"
       className="flex h-full min-h-[60vh] flex-col items-center justify-center bg-background px-4 py-10 text-foreground"
     >
+      <a href="/" aria-label="AVMOS home" className="absolute left-4 top-4 w-36 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400"><img src="/avmos-logo.png" alt="AVMOS" className="w-full" /></a>
       <div className="w-full max-w-lg text-center">
         <div className="mb-4 flex justify-center">
           <span className="inline-flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10 text-destructive">
@@ -128,13 +129,13 @@ export function ErrorScreen({ error, onReset }: ErrorScreenProps) {
           </div>
         )}
 
-        {rawMessage && (
+        {import.meta.env.DEV && rawMessage && (
           <pre className="mt-4 overflow-x-auto rounded-lg border bg-muted/40 px-3 py-2 text-left text-xs text-muted-foreground">
             {rawMessage}
           </pre>
         )}
 
-        {stack && (
+        {import.meta.env.DEV && stack && (
           <details className="mt-2 text-left">
             <summary className="cursor-pointer text-xs text-muted-foreground">Show stack trace</summary>
             <pre className="mt-1 max-h-60 overflow-auto rounded-lg border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">

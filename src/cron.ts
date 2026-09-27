@@ -30,14 +30,22 @@ import type { CronTask } from 'deepspace/worker'
 import type { Env } from '../worker'
 import { executeAgentCycle } from './actions'
 import { createActionTools } from './server/action-routes'
+import { pollInfrastructure } from './telemetry/poller'
 
-export const tasks: CronTask[] = [{ name: 'observe-infrastructure', intervalMinutes: 15 }]
+export const tasks: CronTask[] = [
+  { name: 'poll-infrastructure', intervalMinutes: 1 },
+  { name: 'operate-infrastructure', intervalMinutes: 15 },
+]
 
 export async function runTask(name: string, env: Env): Promise<void> {
-  if (name !== 'observe-infrastructure') throw new Error(`Unknown cron task: ${name}`)
+  if (name === 'poll-infrastructure') {
+    await pollInfrastructure(env)
+    return
+  }
+  if (name !== 'operate-infrastructure') throw new Error(`Unknown cron task: ${name}`)
   if (env.AUTONOMOUS_RUNS_ENABLED !== 'true') return
   const tools = createActionTools(env, env.OWNER_USER_ID, env.APP_OWNER_JWT)
   const slot = Math.floor(Date.now() / (15 * 60_000))
-  const result = await executeAgentCycle(tools, env, 'live', `cron-${env.NEW_RELIC_RESOURCE_ID ?? 'server1'}-${slot}`)
+  const result = await executeAgentCycle(tools, env, 'live', `cron-${env.NEW_RELIC_RESOURCE_ID ?? 'avmos'}-${slot}`)
   if (!result.success) throw new Error(result.error)
 }

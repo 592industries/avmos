@@ -2,17 +2,14 @@
  * Dynamic app boundary — the auth + realtime data layer.
  *
  * `(app)` is a Generouted route group: the parentheses mean it does NOT appear
- * in the URL, so (app)/home.tsx is served at /home. Every page under this
+ * in the URL, so (app)/index.tsx is served at /. Every page under this
  * folder is wrapped in the DeepSpace providers below, so it may call `useAuth`,
  * `useQuery`, `useMutations`, presence/Yjs hooks, etc.
  *
- * Pages OUTSIDE this folder (top level of src/pages/) get none of this — they
- * render as static pages with no auth fetch and no records WebSocket. Move a
- * page in or out of (app)/ to flip it between dynamic and static. Require
+ * Pages OUTSIDE this folder (top level of src/pages/) get none of this. Require
  * sign-in on top of the data layer by nesting under (app)/(protected)/.
  *
- * This is where the app chrome (Navigation) lives, so static pages can present
- * their own layout without inheriting it.
+ * This is where the app chrome (Navigation) lives.
  */
 
 import { Suspense, type ReactNode } from 'react'
@@ -59,7 +56,7 @@ function AuthBoot({ children }: { children: ReactNode }) {
   const { error, warning } = useToast()
 
   if (!isLoaded) {
-    return <div aria-busy="true" className="fixed inset-0 bg-background" />
+    return <div aria-busy="true" className="fixed inset-0 bg-background text-foreground"><a href="/" aria-label="AVMOS home" className="absolute left-4 top-4 w-36 focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400"><img src="/avmos-logo.png" alt="AVMOS" className="w-full" /></a><div className="flex h-full flex-col items-center justify-center gap-2"><strong className="text-3xl">AVMOS</strong><span className="text-sm text-muted-foreground">Connecting to the control plane…</span></div></div>
   }
 
   return (

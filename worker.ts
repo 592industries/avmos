@@ -32,7 +32,7 @@ import {
   resolveAuth,
 } from './src/server/http-routes.js'
 import { registerRealtimeRoutes } from './src/server/realtime-routes.js'
-import { allowRequest, lookupOperation, reserveOperation, transitionOperation } from './src/operations/guard.js'
+import { acquirePollLease, allowRequest, lookupOperation, releasePollLease, reserveOperation, transitionOperation } from './src/operations/guard.js'
 
 // Dynamic deploy reads this manifest to create the app's DO bindings.
 export const __DO_MANIFEST__ = [
@@ -68,6 +68,18 @@ export class AppRecordRoom extends RecordRoom<Env> {
         if (!body.key || body.key.length > 200 || !Number.isInteger(body.limit) || body.limit < 1 || body.limit > 1000) throw new Error('Invalid rate limit.')
         return Response.json({ allowed: await allowRequest(this.operationState.storage, body.key, body.limit) })
       } catch { return Response.json({ error: 'Invalid rate request.' }, { status: 400 }) }
+    }
+    if (path === '/internal/avmos/poll-lease' && request.method === 'POST') {
+      try {
+        const body = await request.json() as { token: string; action: 'acquire' | 'release' }
+        if (!body.token || body.token.length > 100) throw new Error('Invalid poll token.')
+        if (body.action === 'acquire') return Response.json({ acquired: await acquirePollLease(this.operationState.storage, body.token) })
+        if (body.action === 'release') {
+          await releasePollLease(this.operationState.storage, body.token)
+          return Response.json({ released: true })
+        }
+        throw new Error('Invalid poll action.')
+      } catch { return Response.json({ error: 'Invalid poll lease request.' }, { status: 400 }) }
     }
     if (path === '/internal/avmos/lookup' && request.method === 'POST') {
       try {

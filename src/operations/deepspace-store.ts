@@ -58,10 +58,37 @@ export class DeepSpaceOperationsStore implements OperationsStore {
           ...(resource.sourceEntityId ? { sourceEntityId: resource.sourceEntityId } : {}),
           alerts: resource.alerts,
           lastObservedAt: resource.lastUpdated,
+          lastQueryAt: new Date().toISOString(),
+          lastQueryStatus: 'SUCCESS',
         },
         resource.id,
       ),
     )
+  }
+
+  async recordTelemetryFailure(resourceId: string, status: 'UNAVAILABLE' | 'ERROR'): Promise<void> {
+    const previous = await this.tools.get('resources', resourceId)
+    const data = previous.success
+      ? (previous.data as { record?: { data?: Record<string, unknown> } }).record?.data
+      : undefined
+    const lastObservedAt = typeof data?.lastObservedAt === 'string' ? data.lastObservedAt : new Date(0).toISOString()
+    await expectSuccess(this.tools.create('resources', {
+      hostname: resourceId,
+      type: 'server',
+      status: 'unknown',
+      telemetryStatus: status,
+      telemetrySource: 'newrelic',
+      historicalStatus: 'UNAVAILABLE',
+      historicalSource: 'newrelic',
+      ...(data?.storageUtilization !== undefined ? { storageUtilization: data.storageUtilization } : {}),
+      metrics: data?.metrics ?? {},
+      trendPoints: data?.trendPoints ?? [],
+      ...(data?.sourceEntityId ? { sourceEntityId: data.sourceEntityId } : {}),
+      alerts: [],
+      lastObservedAt,
+      lastQueryAt: new Date().toISOString(),
+      lastQueryStatus: status,
+    }, resourceId))
   }
 
   async recordAgentRun(agent: {

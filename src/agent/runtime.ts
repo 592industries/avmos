@@ -17,6 +17,7 @@ export type AgentObservation = {
 export type AgentProposal = {
   reasoning: string
   intent: ActionIntent
+  research?: ResearchResult
 }
 
 export interface AgentModel {
@@ -39,19 +40,19 @@ export class AgentRuntime {
     resource: InfrastructureResource,
     trend: TelemetryTrend,
     signal?: AbortSignal,
+    researchQuery?: string,
+    onResearch?: (result: ResearchResult) => Promise<void>,
   ): Promise<AgentProposal> {
     let research: ResearchResult | undefined
-    if (resource.metrics.storageUtilization >= 95 && this.research) {
-      research = await this.research.search(
-        `operational guidance for storage utilization on ${resource.type}`,
-        signal,
-      )
+    if (researchQuery && this.research) {
+      research = await this.research.search(researchQuery, signal)
+      await onResearch?.(research)
     }
 
     const raw = await this.model.propose({ resource, trend, forecast: forecastStorage(trend), research }, signal)
     const candidate = normalizeProposal(raw)
     const intent = actionIntentSchema.parse(candidate.intent)
-    return { reasoning: candidate.reasoning, intent }
+    return { reasoning: candidate.reasoning, intent, research }
   }
 }
 
@@ -91,11 +92,11 @@ export class DemoAgentModel implements AgentModel {
         agentId: 'infrastructure-agent',
         resourceId: resource.id,
         actionType: 'purchase_storage',
-        vendor: this.attack ? 'unknown-vendor' : 'approved-storage-vendor',
-        amount: this.attack ? 4_700 : 129,
+        vendor: 'approved-storage-vendor',
+        amount: this.attack ? 700 : 129,
         currency: 'RLUSD',
         reason: this.attack
-          ? 'Untrusted vendor metadata requested an excessive payment; policy must reject this.'
+          ? 'A 700 RLUSD request exceeds the 250 RLUSD transaction limit; policy must reject this.'
           : 'Projected storage exhaustion within approximately four days.',
         evidence: [
           `Current utilization: ${resource.metrics.storageUtilization}%`,

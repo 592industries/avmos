@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { defaultPolicy, type ActionIntent } from '../domain/operations'
+import { defaultPolicy, type ActionIntent, type InfrastructureResource } from '../domain/operations'
 import { evaluatePolicy } from './engine'
 
 const validIntent = (overrides: Partial<ActionIntent> = {}): ActionIntent => ({
   id: 'intent-1',
   agentId: 'infrastructure-agent',
-  resourceId: 'server1',
+  resourceId: 'avmos',
   actionType: 'purchase_storage',
   reason: 'Storage will be exhausted within four days.',
   evidence: ['Current storage utilization is 91%.'],
@@ -17,11 +17,17 @@ const validIntent = (overrides: Partial<ActionIntent> = {}): ActionIntent => ({
   metadata: {},
   ...overrides,
 })
+const validResource = (): InfrastructureResource => ({ id: 'avmos', hostname: 'avmos', type: 'server', status: 'critical', metrics: { storageUtilization: 91 }, alerts: [], lastUpdated: new Date().toISOString(), source: 'newrelic', telemetryStatus: 'LIVE' })
 
 describe('deterministic policy engine', () => {
   it('approves a valid bounded action', () => {
-    expect(evaluatePolicy({ intent: validIntent(), policy: defaultPolicy(), spentToday: 0 }).decision)
+    expect(evaluatePolicy({ intent: validIntent(), policy: defaultPolicy(), spentToday: 0, resource: validResource() }).decision)
       .toBe('APPROVED')
+  })
+
+  it('does not authorize spending below the 80% action threshold', () => {
+    const decision = evaluatePolicy({ intent: validIntent(), policy: defaultPolicy(), spentToday: 0, resource: { ...validResource(), metrics: { storageUtilization: 79 } } })
+    expect(decision.checks).toContainEqual(expect.objectContaining({ name: 'action_threshold', passed: false }))
   })
 
   it.each([
@@ -74,7 +80,7 @@ describe('deterministic policy engine', () => {
     const decision = evaluatePolicy({
       intent: validIntent(), policy: defaultPolicy(), spentToday: 0,
       resource: {
-        id: 'server1', hostname: 'server1', type: 'server', status: 'critical',
+        id: 'avmos', hostname: 'avmos', type: 'server', status: 'critical',
         metrics: { storageUtilization: 91 }, alerts: [],
         lastUpdated: new Date(Date.now() - 180_000).toISOString(), source: 'newrelic',
         telemetryStatus: 'STALE',

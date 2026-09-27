@@ -38,11 +38,13 @@ describe('operations security boundary', () => {
   it('never calls the XRPL executor for a denied action', async () => {
     const execute = vi.fn<PaymentExecutor['execute']>()
     const { value, store } = orchestrator(new DemoAgentModel(true), { execute })
-    const result = await value.run('server1')
+    const result = await value.run('avmos')
 
     expect(result.action.policyDecision.decision).toBe('DENIED')
+    expect(result.action.actionIntent.amount).toBe(700)
+    expect(result.action.policyDecision.checks.find((check) => check.name === 'transaction_limit')?.passed).toBe(false)
     expect(execute).not.toHaveBeenCalled()
-    expect(store.audits.some((event) => event.eventType === 'DENIED')).toBe(true)
+    expect(store.audits.some((event) => event.eventType === 'POLICY_DENIED')).toBe(true)
     expect(store.audits.some((event) => event.eventType === 'EXECUTION_STARTED')).toBe(false)
   })
 
@@ -58,7 +60,7 @@ describe('operations security boundary', () => {
       timestamp: new Date().toISOString(),
     })
     const { value, store } = orchestrator(new DemoAgentModel(), { execute })
-    const result = await value.run('server1')
+    const result = await value.run('avmos')
 
     expect(result.action.policyDecision.decision).toBe('APPROVED')
     expect(execute).toHaveBeenCalledOnce()
@@ -71,7 +73,7 @@ describe('operations security boundary', () => {
   it('records XRPL failure without reporting success', async () => {
     const execute = vi.fn<PaymentExecutor['execute']>().mockRejectedValue(new Error('ledger offline'))
     const { value, store } = orchestrator(new DemoAgentModel(), { execute })
-    const result = await value.run('server1')
+    const result = await value.run('avmos')
 
     expect(result.action.executionStatus).toBe('FAILED')
     expect(store.audits.at(-1)?.eventType).toBe('EXECUTION_FAILED')

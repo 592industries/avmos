@@ -37,7 +37,7 @@ export class NewRelicTelemetryAdapter implements TelemetrySource {
     if (!row) throw new Error('New Relic host is not reporting storage telemetry.')
     const utilization = finitePercent(row.utilization)
     const observedMs = Number(row.observedAt)
-    if (!Number.isFinite(observedMs) || observedMs <= 0) throw new Error('New Relic telemetry has no valid observation timestamp.')
+    if (!Number.isFinite(observedMs) || observedMs <= 0 || observedMs > Date.now() + 30_000) throw new Error('New Relic telemetry has no valid observation timestamp.')
     const receivedAt = new Date().toISOString()
     const freshnessSeconds = Math.max(0, Math.floor((Date.now() - observedMs) / 1000))
     const status = freshnessSeconds > 600 ? 'OFFLINE' : freshnessSeconds > 120 ? 'STALE' : 'LIVE'
@@ -45,7 +45,7 @@ export class NewRelicTelemetryAdapter implements TelemetrySource {
       id: resourceId,
       hostname: typeof row.hostname === 'string' && row.hostname ? row.hostname : resourceId,
       type: 'server',
-      status: status === 'OFFLINE' ? 'offline' : utilization >= 90 ? 'critical' : utilization >= 80 ? 'warning' : 'online',
+      status: status === 'OFFLINE' ? 'offline' : utilization >= 90 ? 'critical' : utilization >= 75 ? 'warning' : 'online',
       metrics: {
         storageUtilization: utilization,
         ...(finiteNonnegative(row.totalBytes) !== undefined ? { storageTotalGb: Number(row.totalBytes) / 1024 ** 3 } : {}),
@@ -68,13 +68,16 @@ export class NewRelicTelemetryAdapter implements TelemetrySource {
       signal,
     )
     const points = rows.flatMap((row) => {
+      if (row.utilization === null || row.utilization === undefined) return []
       const value = Number(row.utilization)
       const seconds = Number(row.beginTimeSeconds)
-      return Number.isFinite(value) && value >= 0 && value <= 100 && Number.isFinite(seconds)
+      return Number.isFinite(value) && value >= 0 && value <= 100 && Number.isFinite(seconds) && seconds > 0 && seconds * 1000 <= Date.now() + 30_000
         ? [{ timestamp: new Date(seconds * 1000).toISOString(), value }]
         : []
     })
+    points.sort((a, b) => a.timestamp.localeCompare(b.timestamp))
     if (points.length < 2) throw new Error('New Relic has insufficient historical storage samples.')
+    if (Date.now() - Date.parse(points.at(-1)!.timestamp) > 2 * 60 * 60_000) throw new Error('New Relic storage trend is stale.')
     return telemetryTrendSchema.parse({ resourceId, metric: 'storage_utilization', points, source: 'newrelic' })
   }
 
@@ -117,6 +120,7 @@ function isObject(value: unknown): value is Record<string, unknown> {
 }
 
 function finitePercent(value: unknown): number {
+  if (value === null || value === undefined || value === '') throw new Error('New Relic returned invalid storage utilization.')
   const number = Number(value)
   if (!Number.isFinite(number) || number < 0 || number > 100) throw new Error('New Relic returned invalid storage utilization.')
   return number

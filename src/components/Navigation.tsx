@@ -12,7 +12,6 @@ import { useState, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { AuthOverlay, useAuthProfileReady, signOut } from 'deepspace'
 import { ChevronDown, LogOut, Menu, X } from 'lucide-react'
-import { APP_NAME } from '../constants'
 import type { Role } from '../constants'
 import { nav } from '../nav'
 import { cn } from '../lib/utils'
@@ -71,8 +70,8 @@ export default function Navigation() {
     <>
       <nav data-testid="app-navigation" className="border-b border-border bg-background">
         <div className="mx-auto flex h-12 max-w-7xl items-center gap-4 px-4">
-          <Link to="/home" className="text-sm font-semibold text-foreground">
-            {APP_NAME}
+          <Link to="/" aria-label="AVMOS home" className="flex h-11 w-36 shrink-0 items-center focus-visible:outline focus-visible:outline-2 focus-visible:outline-cyan-400">
+            <img src="/avmos-logo.png" alt="AVMOS" className="max-h-10 w-full object-contain object-left" />
           </Link>
 
           <div className="hidden items-center md:flex">{visibleNav.map(navLink)}</div>

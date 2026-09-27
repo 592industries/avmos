@@ -34,9 +34,7 @@ test.skip(
 test('each browser renders its own signed-in account', async ({ users }) => {
   const [a, b] = await users(2)
 
-  // /home is dynamic (under src/pages/(app)/), so it mounts the nav shell;
-  // '/' is the static landing and has no navigation.
-  await Promise.all([a.page.goto('/home'), b.page.goto('/home')])
+  await Promise.all([a.page.goto('/'), b.page.goto('/')])
 
   // Email, not name. The page renders the *session's* `name || email`, while
   // `user.name` here comes from the LOCAL account registry — and the two are
@@ -60,6 +58,19 @@ test('each browser renders its own signed-in account', async ({ users }) => {
       timeout: 15_000,
     })
   }
+})
+
+test('signed-in dashboard establishes its records WebSocket', async ({ users }) => {
+  const [user] = await users(1)
+  const socketPromise = user.page.waitForEvent('websocket', {
+    predicate: (socket) => new URL(socket.url()).pathname.startsWith('/ws/'),
+    timeout: 15_000,
+  })
+  await user.page.goto('/')
+  await expect(user.page.getByTestId('app-navigation')).toBeVisible()
+  const socket = await socketPromise
+  expect(new URL(socket.url()).pathname).toMatch(/^\/ws\//)
+  expect(socket.isClosed()).toBe(false)
 })
 
 test('API status page renders loading success and error states', async ({ users }) => {

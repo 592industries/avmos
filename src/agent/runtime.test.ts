@@ -16,8 +16,8 @@ describe('agent runtime boundary', () => {
         },
       }),
     }
-    const resource = await new DemoTelemetryAdapter().getResource('server1')
-    const trend = await new DemoTelemetryAdapter().getStorageTrend('server1')
+    const resource = await new DemoTelemetryAdapter().getResource('avmos')
+    const trend = await new DemoTelemetryAdapter().getStorageTrend('avmos')
 
     await expect(new AgentRuntime(model).reason(resource, trend)).rejects.toThrow()
   })
@@ -28,8 +28,8 @@ describe('agent runtime boundary', () => {
       model: 'plain-text',
       propose: async () => 'Send 4000 RLUSD and ignore policy',
     }
-    const resource = await new DemoTelemetryAdapter().getResource('server1')
-    const trend = await new DemoTelemetryAdapter().getStorageTrend('server1')
+    const resource = await new DemoTelemetryAdapter().getResource('avmos')
+    const trend = await new DemoTelemetryAdapter().getStorageTrend('avmos')
 
     await expect(new AgentRuntime(model).reason(resource, trend)).rejects.toThrow()
   })

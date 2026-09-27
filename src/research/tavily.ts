@@ -1,4 +1,7 @@
 export type ResearchResult = {
+  status: 'RESEARCH_COMPLETE' | 'RESEARCH_TIMEOUT' | 'RESEARCH_FAILED' | 'RESEARCH_UNAVAILABLE'
+  query: string
+  requestedAt: string
   answer?: string
   sources: Array<{ title: string; url: string; content: string }>
 }
@@ -29,6 +32,7 @@ export class TavilyResearchProvider implements ResearchProvider {
       results?: Array<{ title?: unknown; url?: unknown; content?: unknown }>
     }
     return {
+      status: 'RESEARCH_COMPLETE', query, requestedAt: new Date().toISOString(),
       answer: typeof data.answer === 'string' ? data.answer : undefined,
       sources: (data.results ?? []).flatMap((item) =>
         typeof item.title === 'string' &&
@@ -45,11 +49,13 @@ export class OptionalResearchProvider implements ResearchProvider {
   constructor(private readonly delegate?: ResearchProvider) {}
 
   async search(query: string, signal?: AbortSignal): Promise<ResearchResult> {
-    if (!this.delegate) return { sources: [] }
+    const requestedAt = new Date().toISOString()
+    if (!this.delegate) return { status: 'RESEARCH_UNAVAILABLE', query, requestedAt, sources: [] }
     try {
-      return await this.delegate.search(query, signal)
-    } catch {
-      return { sources: [] }
+      const bounded = signal ? AbortSignal.any([signal, AbortSignal.timeout(8_000)]) : AbortSignal.timeout(8_000)
+      return await this.delegate.search(query, bounded)
+    } catch (error) {
+      return { status: error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError') ? 'RESEARCH_TIMEOUT' : 'RESEARCH_FAILED', query, requestedAt, sources: [] }
     }
   }
 }

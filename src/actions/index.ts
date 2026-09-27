@@ -25,16 +25,17 @@ const runAgentCycle: ActionHandler<Env> = async ({ userId, params, tools, env })
   if (userId !== env.OWNER_USER_ID) return { success: false, error: 'Forbidden: owner only' }
   const mode: CycleMode = params.mode === 'demo-denied' ? 'demo-denied' : params.mode === 'demo-approved' ? 'demo-approved' : 'live'
   if (mode !== 'live' && env.DEMO_MODE !== 'true') return { success: false, error: 'Demo mode is disabled.' }
-  return executeAgentCycle(tools, env, mode, String(params.idempotencyKey ?? crypto.randomUUID()))
+  return executeAgentCycle(tools, env, mode, String(params.idempotencyKey ?? crypto.randomUUID()), params.research === true)
 }
 
-export async function executeAgentCycle(tools: ActionTools, env: Env, mode: CycleMode, idempotencyKey: string = crypto.randomUUID()) {
-  const resourceId = env.NEW_RELIC_RESOURCE_ID ?? 'server1'
+export async function executeAgentCycle(tools: ActionTools, env: Env, mode: CycleMode, idempotencyKey: string = crypto.randomUUID(), research = false) {
+  const resourceId = env.NEW_RELIC_RESOURCE_ID ?? 'avmos'
+  const requestTag = `${mode}:${research ? 'research' : 'no-research'}`
   const namespace = env.RECORD_ROOMS
   const stub = namespace.get(namespace.idFromName(`app:${env.DEEPSPACE_APP_ID}`))
   const lookup = await stub.fetch(new Request('https://internal/internal/avmos/lookup', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ idempotencyKey, requestHash: await operationRequestHash(resourceId, mode) }),
+    body: JSON.stringify({ idempotencyKey, requestHash: await operationRequestHash(resourceId, requestTag) }),
   }))
   if (!lookup.ok) return { success: false as const, error: 'Operation idempotency service is unavailable.' }
   const existing = await lookup.json() as { code: 'NEW' | 'REPLAY' | 'IDEMPOTENCY_CONFLICT'; operationId?: string }
@@ -61,7 +62,7 @@ export async function executeAgentCycle(tools: ActionTools, env: Env, mode: Cycl
   const telemetry = demo ? new DemoTelemetryAdapter() : new NewRelicTelemetryAdapter({
     userKey: env.NEW_RELIC_USER_KEY!, accountId: Number(env.NEW_RELIC_ACCOUNT_ID),
     entityGuid: env.NEW_RELIC_ENTITY_GUID!, region: (env.NEW_RELIC_REGION ?? 'US') as 'US' | 'EU' | 'JP',
-    resourceId: env.NEW_RELIC_RESOURCE_ID ?? 'server1',
+    resourceId,
   })
   const model = demo ? new DemoAgentModel(mode === 'demo-denied') : new GrokAgentModel({
     apiKey: env.GROK_API_KEY!, model: env.GROK_MODEL, baseUrl: env.GROK_BASE_URL,
@@ -89,7 +90,7 @@ export async function executeAgentCycle(tools: ActionTools, env: Env, mode: Cycl
     destinations,
     demo,
   )
-    const result = await orchestrator.run(resourceId, idempotencyKey, undefined, mode)
+    const result = await orchestrator.run(resourceId, idempotencyKey, AbortSignal.timeout(60_000), requestTag, research ? 'current storage capacity remediation options and vendor documentation for a cloud server' : undefined)
     return {
       success: true as const,
       data: {
@@ -215,6 +216,8 @@ export const actions: Record<string, ActionHandler<Env>> = {
 }
 
 async function resolvePolicy(tools: ActionTools, env: Env, demo: boolean): Promise<Policy> {
+  // Demo outcomes are fixed and never inherit a production policy's limits.
+  if (demo) return defaultPolicy()
   const result = await tools.query('policies', { limit: 10 })
   if (!result.success) throw new Error(result.error)
   const records = (result.data as { records?: Array<{ data?: unknown }> }).records ?? []
@@ -228,7 +231,6 @@ async function resolvePolicy(tools: ActionTools, env: Env, demo: boolean): Promi
     return selected
   }
   if (active.length === 1) return active[0]
-  if (active.length === 0 && demo) return defaultPolicy()
   throw new Error('Exactly one active authorization policy is required.')
 }
 
@@ -261,9 +263,9 @@ function answerFromState(
     if (!latestAction || !isObject(latestAction.actionIntent)) return 'No financial action is recorded.'
     return `The agent proposed ${String(latestAction.actionIntent.amount)} ${String(latestAction.actionIntent.currency)} for ${String(latestAction.actionIntent.vendor)}. Policy result: ${isObject(latestAction.policyDecision) ? String(latestAction.policyDecision.decision) : 'unknown'}; execution: ${String(latestAction.executionStatus)}.`
   }
-  if (normalized.includes('server1') || normalized.includes('resource')) {
+  if (normalized.includes('avmos') || normalized.includes('resource')) {
     if (!latestResource || !isObject(latestResource.metrics)) return 'No resource telemetry is recorded.'
-    return `server1 is ${String(latestResource.status)} with ${String(latestResource.metrics.storageUtilization)}% storage utilization.`
+    return `avmos is ${String(latestResource.status)} with ${String(latestResource.metrics.storageUtilization ?? 'unavailable')}% storage utilization.`
   }
   return `AVMOS currently has ${state.resources.length} resource(s), ${state.actions.length} action(s), and ${state.audits.length} audit event(s).`
 }

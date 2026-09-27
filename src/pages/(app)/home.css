@@ -29,7 +29,8 @@
 .avmos-hero-status small { color: var(--avmos-muted); font: 10px Consolas, monospace; letter-spacing: .08em; }
 .avmos-status-grid { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--avmos-border); margin: 26px 0; }
 .avmos-status { min-height: 98px; display: flex; flex-direction: column; justify-content: center; padding: 15px 22px; border-right: 1px solid var(--avmos-border); }
-.avmos-status:last-child { border-right: 0; }
+.avmos-status:nth-child(4n) { border-right: 0; }
+.avmos-status:nth-child(-n+4) { border-bottom: 1px solid var(--avmos-border); }
 .avmos-status strong { display: block; margin: 6px 0 3px; font-size: 16px; letter-spacing: .02em; }
 .avmos-status small { color: var(--avmos-muted); font-size: 10px; letter-spacing: .08em; }
 .avmos-columns { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(320px, 1fr); gap: 18px; align-items: start; }
@@ -62,6 +63,8 @@
 .avmos-step svg { position: absolute; right: -10px; top: 26px; z-index: 1; color: var(--avmos-blue); background: var(--avmos-surface); }
 .avmos-rule { margin: 20px 0; color: var(--avmos-muted); font-size: 12px; line-height: 1.6; }
 .avmos-controls { display: flex; flex-wrap: wrap; gap: 10px; }
+.avmos-research-option { display: flex; align-items: center; gap: 9px; margin: 0 0 16px; color: var(--avmos-muted); font-size: 12px; }
+.avmos-research-option input { accent-color: var(--avmos-blue); }
 .avmos-controls button { min-height: 38px; font-size: 10px; letter-spacing: .04em; }
 .avmos-notice, .avmos-answer { margin-top: 15px; padding: 12px; color: var(--avmos-white); background: var(--avmos-surface-raised); border-left: 2px solid var(--avmos-blue); font-size: 12px; }
 .avmos-empty { color: var(--avmos-muted); font-size: 12px; line-height: 1.5; }
@@ -94,6 +97,6 @@
 .avmos-page :is(a, button, input):focus-visible { outline: 2px solid var(--avmos-blue); outline-offset: 3px; }
 
 @media (max-width: 1150px) { .avmos-columns { grid-template-columns: minmax(0, 1.3fr) minmax(300px, 1fr); } .avmos-pipeline { grid-template-columns: repeat(4, 1fr); } .avmos-step:nth-child(4) svg { display: none; } }
-@media (max-width: 850px) { .avmos-wrap { padding: 24px 20px 60px; } .avmos-columns { grid-template-columns: 1fr; } .avmos-status-grid { grid-template-columns: repeat(2, 1fr); } .avmos-status:nth-child(2) { border-right: 0; } .avmos-status:nth-child(-n+2) { border-bottom: 1px solid var(--avmos-border); } }
+@media (max-width: 850px) { .avmos-wrap { padding: 24px 20px 60px; } .avmos-columns { grid-template-columns: 1fr; } .avmos-status-grid { grid-template-columns: repeat(2, 1fr); } .avmos-status:nth-child(even) { border-right: 0; } .avmos-status:nth-child(-n+6) { border-bottom: 1px solid var(--avmos-border); } }
 @media (max-width: 540px) { .avmos-wrap { padding: 18px 14px 50px; } .avmos-eyebrow span { display: none; } .avmos-hero-main { display: block; padding-top: 27px; } .avmos-hero h1 { font-size: 72px; } .avmos-kicker { max-width: 300px; font-size: 9px; line-height: 1.5; } .avmos-hero-status { margin-top: 25px; } .avmos-status { padding: 13px; min-height: 90px; } .avmos-status strong { font-size: 12px; } .avmos-panel > header { padding: 13px; } .avmos-panel > header small { max-width: 100px; } .avmos-panel-body { padding: 16px; } .avmos-telemetry { grid-template-columns: 1fr; } .avmos-pipeline { grid-template-columns: repeat(2, 1fr); } .avmos-step:nth-child(even) svg { display: none; } .avmos-controls { display: grid; } }
 @media (prefers-reduced-motion: reduce) { .avmos-panel { transition: none; } .avmos-status-dot.is-live { box-shadow: none; } }

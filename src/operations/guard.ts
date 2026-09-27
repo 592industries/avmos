@@ -23,6 +23,24 @@ export type ReserveResult =
 const PREFIX = 'avmos:reservation:'
 const KEY_PREFIX = 'avmos:idempotency:'
 const DAY_MS = 86_400_000
+const POLL_LEASE_KEY = 'avmos:telemetry-poll-lease'
+
+export async function acquirePollLease(storage: DurableObjectStorage, token: string, now = Date.now()): Promise<boolean> {
+  if (!token) throw new Error('Poll token required.')
+  return storage.transaction(async (tx) => {
+    const current = await tx.get<{ token: string; expiresAt: number; nextAt: number }>(POLL_LEASE_KEY)
+    if (current && (current.expiresAt > now || current.nextAt > now)) return false
+    await tx.put(POLL_LEASE_KEY, { token, expiresAt: now + 90_000, nextAt: now + 60_000 })
+    return true
+  })
+}
+
+export async function releasePollLease(storage: DurableObjectStorage, token: string, now = Date.now()): Promise<void> {
+  await storage.transaction(async (tx) => {
+    const current = await tx.get<{ token: string; expiresAt: number; nextAt: number }>(POLL_LEASE_KEY)
+    if (current?.token === token) await tx.put(POLL_LEASE_KEY, { ...current, expiresAt: now })
+  })
+}
 
 export async function operationRequestHash(resourceId: string, requestTag: string): Promise<string> {
   const bytes = new TextEncoder().encode(JSON.stringify({ resourceId, requestTag }))

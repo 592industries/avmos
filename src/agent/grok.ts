@@ -39,7 +39,7 @@ export class GrokAgentModel implements AgentModel {
           },
         ],
       }),
-      signal,
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(25_000)]) : AbortSignal.timeout(25_000),
     })
     if (!response.ok) throw new Error(`Grok request failed (${response.status})`)
     const data = (await response.json()) as {

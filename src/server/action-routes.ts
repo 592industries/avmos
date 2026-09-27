@@ -38,7 +38,7 @@ import type { AppContext, Env } from '../../worker.js'
 type ResolveAuth = (req: Request, env: Env) => Promise<VerifyResult | null>
 
 const ACTION_POLICY = {
-  runAgentCycle: { schema: z.object({ mode: z.enum(['live', 'demo-approved', 'demo-denied']).optional() }).strict(), ownerOnly: true, roles: ['admin'], perMinute: 4, idempotencyRequired: true },
+  runAgentCycle: { schema: z.object({ mode: z.enum(['live', 'demo-approved', 'demo-denied']).optional(), research: z.boolean().optional() }).strict(), ownerOnly: true, roles: ['admin'], perMinute: 4, idempotencyRequired: true },
   askOperator: { schema: z.object({ question: z.string().trim().min(1).max(500) }).strict(), ownerOnly: false, roles: ['admin', 'member'], perMinute: 20, idempotencyRequired: false },
   setupXrplTrustLine: { schema: z.object({}).strict(), ownerOnly: true, roles: ['admin'], perMinute: 1, idempotencyRequired: true },
   reconcileXrplOperation: { schema: z.object({ operationId: z.string().min(1).max(100) }).strict(), ownerOnly: true, roles: ['admin'], perMinute: 4, idempotencyRequired: true },

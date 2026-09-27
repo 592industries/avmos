@@ -35,6 +35,8 @@ export const resourcesSchema: CollectionSchema = {
     { name: 'sourceEntityId', storage: 'text', interpretation: 'plain' },
     { name: 'alerts', storage: 'text', interpretation: { kind: 'json' }, required: true },
     { name: 'lastObservedAt', storage: 'text', interpretation: { kind: 'datetime' }, required: true },
+    { name: 'lastQueryAt', storage: 'text', interpretation: { kind: 'datetime' } },
+    { name: 'lastQueryStatus', storage: 'text', interpretation: 'plain' },
   ],
   permissions: readOnlyPermissions,
 }
