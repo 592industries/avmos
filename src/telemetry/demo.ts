@@ -5,11 +5,11 @@ import type { TelemetrySource } from './newrelic'
 export class DemoTelemetryAdapter implements TelemetrySource {
   async getResource(resourceId: string): Promise<InfrastructureResource> {
     return infrastructureResourceSchema.parse({
-      id: resourceId, hostname: resourceId, type: 'server', status: 'critical',
+      id: resourceId, workspaceId: 'workspace-default', provider: 'demo', externalId: resourceId, hostname: resourceId, type: 'server', status: 'critical',
       metrics: { storageUtilization: 91, storageTotalGb: 1000, storageUsedGb: 910 },
       alerts: ['Demo storage utilization exceeded 90%'],
       lastUpdated: new Date().toISOString(), receivedAt: new Date().toISOString(),
-      telemetryStatus: 'DEMO', freshnessSeconds: 0, source: 'demo',
+      telemetryStatus: 'DEMO', freshnessSeconds: 0, source: 'demo', monitoringEnabled: true, autonomousEnabled: true,
     })
   }
 

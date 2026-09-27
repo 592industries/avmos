@@ -55,10 +55,13 @@ export async function runTask(name: string, env: Env): Promise<void> {
   if (env.AUTONOMOUS_RUNS_ENABLED !== 'true') return
   const tools = createActionTools(env, env.OWNER_USER_ID, env.APP_OWNER_JWT)
   const slot = Math.floor(Date.now() / (15 * 60_000))
-  const resources = await tools.query<{ telemetryStatus?: string }>('resources', { limit: 100 })
+  const resources = await tools.query<{ workspaceId?: string; telemetryStatus?: string; monitoringEnabled?: boolean; autonomousEnabled?: boolean }>('resources', { limit: 500 })
   if (!resources.success) throw new Error(resources.error)
-  const target = resources.data.records.find((row) => row.data.telemetryStatus === 'LIVE' && /^avmos-node-\d{2}$/.test(row.recordId))
-  if (!target) return
-  const result = await executeAgentCycle(tools, env, target.recordId, `cron-${target.recordId}-${slot}`)
-  if (!result.success) throw new Error(result.error)
+  const targets = resources.data.records.filter((row) => row.data.telemetryStatus === 'LIVE' && row.data.monitoringEnabled === true && row.data.autonomousEnabled === true && typeof row.data.workspaceId === 'string')
+  const failures: string[] = []
+  for (const target of targets) {
+    const result = await executeAgentCycle(tools, env, target.data.workspaceId!, target.recordId, `cron-${target.recordId}-${slot}`)
+    if (!result.success) failures.push(`${target.recordId}: ${result.error}`)
+  }
+  if (failures.length) throw new Error(failures.join('; '))
 }

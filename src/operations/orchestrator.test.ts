@@ -31,6 +31,8 @@ function orchestrator(model: DemoAgentModel, executor: PaymentExecutor, store = 
       store,
       { 'approved-storage-vendor': 'rProtectedVendorTestnet' },
       true,
+      'workspace-default',
+      true,
     ),
   }
 }
@@ -69,6 +71,26 @@ describe('operations security boundary', () => {
     expect(store.audits.at(-1)).toEqual(
       expect.objectContaining({ eventType: 'EXECUTION_SUCCEEDED', transactionHash: 'ABC123' }),
     )
+  })
+
+  it('does not call the executor when global autonomy is disabled', async () => {
+    const execute = vi.fn<PaymentExecutor['execute']>()
+    const store = new MemoryStore()
+    const value = new OperationsOrchestrator(
+      new DemoTelemetryAdapter(),
+      new AgentRuntime(new DemoAgentModel()),
+      defaultPolicy(),
+      { execute },
+      store,
+      { 'approved-storage-vendor': 'rProtectedVendorTestnet' },
+      true,
+      'workspace-default',
+      false,
+    )
+    const result = await value.run('avmos')
+    expect(result.action.policyDecision.decision).toBe('DENIED')
+    expect(result.action.policyDecision.checks).toContainEqual(expect.objectContaining({ name: 'global_autonomy_enabled', passed: false }))
+    expect(execute).not.toHaveBeenCalled()
   })
 
   it('records XRPL failure without reporting success', async () => {

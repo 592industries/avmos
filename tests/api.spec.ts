@@ -11,12 +11,16 @@ test.describe('API tests', () => {
     expect(res.status()).toBe(401)
   })
 
-  test('public fleet status is sanitized and available without authentication', async ({ request }) => {
+  test('tenant fleet status is not exposed publicly', async ({ request }) => {
     const res = await request.get('/api/public/status')
-    expect(res.ok()).toBeTruthy()
-    const body = await res.json()
-    expect(body).toEqual(expect.objectContaining({ telemetry: expect.any(String), resources: expect.any(Number) }))
-    expect(JSON.stringify(body)).not.toMatch(/apiKey|token|secret|wallet|jwt/i)
+    expect(res.status()).toBe(404)
+  })
+
+  test('workspace and resource mutations reject anonymous callers', async ({ request }) => {
+    expect((await request.get('/api/avmos/workspaces')).status()).toBe(401)
+    expect((await request.post('/api/avmos/workspaces', { data: { name: 'Other' } })).status()).toBe(401)
+    expect((await request.post('/api/avmos/resources/resource-web-01/controls', { data: { monitoringEnabled: true } })).status()).toBe(401)
+    expect((await request.post('/api/actions/runAgentCycle', { data: { workspaceId: 'workspace-a', resourceId: 'resource-web-01' } })).status()).toBe(401)
   })
 
   for (const route of [

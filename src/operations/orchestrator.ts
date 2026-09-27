@@ -14,6 +14,7 @@ import type { TelemetrySource } from '../telemetry/newrelic'
 import { safeMessage } from '../telemetry/retention'
 import { DefinitivePaymentError, SubmissionUnknownError, type PaymentExecutor } from '../xrpl/executor'
 import { operationRequestHash, type ReserveRequest, type ReserveResult } from './guard'
+import { executionSafetyGate } from './execution-safety'
 
 export type OperationAction = {
   id: string
@@ -68,6 +69,8 @@ export class OperationsOrchestrator {
     private readonly store: OperationsStore,
     private readonly vendorDestinations: Readonly<Record<string, string>>,
     private readonly allowDemo = false,
+    private readonly workspaceId = 'workspace-default',
+    private readonly globalAutonomyEnabled = false,
   ) {}
 
   async run(resourceId: string, idempotencyKey: string = crypto.randomUUID(), signal?: AbortSignal, requestTag = 'live', researchQuery?: string): Promise<OperationResult> {
@@ -99,13 +102,13 @@ export class OperationsOrchestrator {
       model: identity.model,
       lastRunAt: new Date().toISOString(),
     })
-    const decisionSummary = summarizeDecision(proposal.reasoning)
-    await this.audit('REASONING', proposal.intent.agentId, actionId, resource.id, { decisionSummary })
-    await this.audit('ACTION_PROPOSED', proposal.intent.agentId, actionId, resource.id, {
+    const decisionSummary = proposal.summary.summary
+    await this.audit('MODEL_PROPOSAL_CREATED', proposal.intent.agentId, actionId, resource.id, {
+      summary: proposal.summary,
       intent: proposal.intent,
     })
 
-    const decision = evaluatePolicy({
+    let decision = evaluatePolicy({
       intent: proposal.intent,
       policy: this.policy,
       spentToday: await this.store.spentToday(),
@@ -114,7 +117,23 @@ export class OperationsOrchestrator {
       providerId: this.executor.providerId ?? 'xrpl-testnet',
       authorizationScope: 'infrastructure:purchase',
       destination: this.vendorDestinations[proposal.intent.vendor],
+      workspaceId: this.workspaceId,
+      globalAutonomyEnabled: this.globalAutonomyEnabled,
     })
+    const executionSafety = executionSafetyGate({
+      globalAutonomyEnabled: this.globalAutonomyEnabled,
+      workspaceId: this.workspaceId,
+      resource,
+      allowDemo: this.allowDemo,
+    })
+    if (decision.decision === 'APPROVED' && !executionSafety.allowed) {
+      decision = {
+        ...decision,
+        decision: 'DENIED',
+        reason: executionSafety.reason,
+        checks: [...decision.checks, { name: 'execution_safety_gate', passed: false, detail: executionSafety.reason }],
+      }
+    }
     await this.audit('POLICY_EVALUATED', 'deterministic-policy-engine', actionId, resource.id, {
       decision,
     })
@@ -175,6 +194,28 @@ export class OperationsOrchestrator {
     await this.store.recordAction(action)
     await this.audit('BUDGET_RESERVED', 'operation-guard', actionId, resource.id, { amount: proposal.intent.amount, policyHash }, decision.policyVersion)
     await this.audit('APPROVED', 'deterministic-policy-engine', actionId, resource.id, { reason: decision.reason, checks: decision.checks }, decision.policyVersion)
+
+    const currentResource = await this.telemetry.getResource(resourceId, signal)
+    const finalSafety = executionSafetyGate({
+      globalAutonomyEnabled: this.globalAutonomyEnabled,
+      workspaceId: this.workspaceId,
+      resource: currentResource,
+      allowDemo: this.allowDemo,
+    })
+    if (!finalSafety.allowed) {
+      await this.store.transition(actionId, 'FAILED')
+      action.executionStatus = 'POLICY_DENIED'
+      action.policyDecision = {
+        ...decision,
+        decision: 'DENIED',
+        reason: finalSafety.reason,
+        checks: [...decision.checks, { name: 'execution_safety_gate_final', passed: false, detail: finalSafety.reason }],
+      }
+      action.auditStatus = 'COMPLETE'
+      await this.store.recordAction(action)
+      await this.audit('POLICY_DENIED', 'execution-safety-gate', actionId, resource.id, { reason: finalSafety.reason }, decision.policyVersion)
+      return { resource, trend, action }
+    }
 
     const payment = createApprovedPaymentRequest(
       proposal.intent,
@@ -258,11 +299,6 @@ export class OperationsOrchestrator {
       transactionHash,
     })
   }
-}
-
-function summarizeDecision(value: string): string {
-  const singleLine = value.replace(/\s+/g, ' ').trim()
-  return (singleLine || 'No decision summary was supplied.').slice(0, 500)
 }
 
 async function sha256(value: string): Promise<string> {

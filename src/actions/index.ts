@@ -10,6 +10,7 @@ import { OperationsOrchestrator } from '../operations/orchestrator'
 import { OptionalResearchProvider, TavilyResearchProvider } from '../research/tavily'
 import { StoredTelemetrySource } from '../telemetry/stored'
 import { safeMessage } from '../telemetry/retention'
+import { requireWorkspaceAccess } from '../workspaces'
 import {
   SimulatedPaymentExecutor,
   TrustLineManager,
@@ -20,12 +21,22 @@ import {
 } from '../xrpl/executor'
 
 const runAgentCycle: ActionHandler<Env> = async ({ userId, params, tools, env }) => {
+  const workspaceId = String(params.workspaceId ?? '')
   const resourceId = String(params.resourceId ?? '')
-  return executeAgentCycle(tools, env, resourceId, String(params.idempotencyKey ?? crypto.randomUUID()), params.research === true, userId)
+  try {
+    await requireWorkspaceAccess(tools, userId, workspaceId)
+  } catch {
+    return { success: false, error: 'Workspace access is required.' }
+  }
+  const resource = await tools.get<{ workspaceId?: string }>('resources', resourceId)
+  if (!resource.success || resource.data.record.data.workspaceId !== workspaceId) {
+    return { success: false, error: 'Resource is unavailable in this workspace.' }
+  }
+  return executeAgentCycle(tools, env, workspaceId, resourceId, String(params.idempotencyKey ?? crypto.randomUUID()), params.research === true, userId)
 }
 
-export async function executeAgentCycle(tools: ActionTools, env: Env, resourceId: string, idempotencyKey: string = crypto.randomUUID(), research = false, actor = 'scheduled-agent') {
-  if (!/^avmos-node-\d{2}$/.test(resourceId)) return { success: false as const, error: 'Requested resource ID is invalid.' }
+export async function executeAgentCycle(tools: ActionTools, env: Env, workspaceId: string, resourceId: string, idempotencyKey: string = crypto.randomUUID(), research = false, actor = 'scheduled-agent') {
+  if (!workspaceId || !resourceId) return { success: false as const, error: 'Workspace and resource are required.' }
   const requestTag = `live:${research ? 'research' : 'no-research'}`
   const namespace = env.RECORD_ROOMS
   const stub = namespace.get(namespace.idFromName(`app:${env.DEEPSPACE_APP_ID}`))
@@ -37,16 +48,18 @@ export async function executeAgentCycle(tools: ActionTools, env: Env, resourceId
   const existing = await lookup.json() as { code: 'NEW' | 'REPLAY' | 'IDEMPOTENCY_CONFLICT'; operationId?: string }
   if (existing.code === 'IDEMPOTENCY_CONFLICT') return { success: false as const, code: 'IDEMPOTENCY_CONFLICT', error: 'Idempotency key conflicts with a different request.' }
   if (existing.code === 'REPLAY') {
-    const action = existing.operationId ? await new DeepSpaceOperationsStore(tools, env).getAction(existing.operationId) : null
+    const action = existing.operationId ? await new DeepSpaceOperationsStore(tools, env, workspaceId).getAction(existing.operationId) : null
     if (!action) return { success: false as const, error: 'Original operation is still in progress.' }
     return { success: true as const, data: { actionId: action.id, decision: action.policyDecision.decision, executionStatus: action.executionStatus, transactionHash: action.execution?.transactionHash, simulation: action.execution?.mode === 'SIMULATED' } }
   }
   try {
-  const telemetry = new StoredTelemetrySource(tools)
+  const telemetry = new StoredTelemetrySource(tools, workspaceId)
   const resource = await telemetry.getResource(resourceId)
-  if (resource.telemetryStatus !== 'LIVE') return { success: true as const, data: await recordResolutionDenial(tools, env, resourceId, actor, 'RESOURCE_TELEMETRY_STALE') }
-  const resolution = await resolvePolicy(tools, env, resourceId)
-  if (!resolution.policy) return { success: true as const, data: await recordResolutionDenial(tools, env, resourceId, actor, resolution.reason) }
+  if (resource.workspaceId !== workspaceId) return { success: false as const, error: 'Resource is unavailable in this workspace.' }
+  if (resource.monitoringEnabled !== true) return { success: true as const, data: await recordResolutionDenial(tools, env, workspaceId, resourceId, actor, 'RESOURCE_NOT_MONITORED') }
+  if (resource.telemetryStatus !== 'LIVE') return { success: true as const, data: await recordResolutionDenial(tools, env, workspaceId, resourceId, actor, 'RESOURCE_TELEMETRY_STALE') }
+  const resolution = await resolvePolicy(tools, env, workspaceId, resourceId)
+  if (!resolution.policy) return { success: true as const, data: await recordResolutionDenial(tools, env, workspaceId, resourceId, actor, resolution.reason) }
   const policy = resolution.policy
   if (!env.XRPL_VENDOR_DESTINATION || !isValidClassicAddress(env.XRPL_VENDOR_DESTINATION)) return { success: false as const, error: 'XRPL vendor destination is not configured with a valid classic address.' }
   if (!env.GROK_API_KEY) return { success: false as const, error: 'Grok configuration is incomplete.' }
@@ -56,7 +69,7 @@ export async function executeAgentCycle(tools: ActionTools, env: Env, resourceId
   const model = new GrokAgentModel({
     apiKey: env.GROK_API_KEY!, model: env.GROK_MODEL, baseUrl: env.GROK_BASE_URL,
   })
-  const research = new OptionalResearchProvider(
+  const researchProvider = new OptionalResearchProvider(
     env.TAVILY_API_KEY ? new TavilyResearchProvider(env.TAVILY_API_KEY) : undefined,
   )
   const executor =
@@ -72,12 +85,14 @@ export async function executeAgentCycle(tools: ActionTools, env: Env, resourceId
 
   const orchestrator = new OperationsOrchestrator(
     telemetry,
-    new AgentRuntime(model, research),
+    new AgentRuntime(model, researchProvider),
     policy,
     executor,
-    new DeepSpaceOperationsStore(tools, env),
+    new DeepSpaceOperationsStore(tools, env, workspaceId),
     destinations,
     false,
+    workspaceId,
+    env.AUTONOMOUS_RUNS_ENABLED === 'true',
   )
     const result = await orchestrator.run(resourceId, idempotencyKey, AbortSignal.timeout(60_000), requestTag, research ? 'current storage capacity remediation options and vendor documentation for a cloud server' : undefined)
     return {
@@ -99,15 +114,17 @@ export async function executeAgentCycle(tools: ActionTools, env: Env, resourceId
   }
 }
 
-const askOperator: ActionHandler<Env> = async ({ params, tools }) => {
+const askOperator: ActionHandler<Env> = async ({ userId, params, tools }) => {
+  const workspaceId = String(params.workspaceId ?? '')
   const question = typeof params.question === 'string' ? params.question.trim() : ''
   if (!question || question.length > 500) {
     return { success: false, error: 'Question must contain 1-500 characters.' }
   }
+  try { await requireWorkspaceAccess(tools, userId, workspaceId) } catch { return { success: false, error: 'Workspace access is required.' } }
   const [resources, actions, audits] = await Promise.all([
-    tools.query('resources', { limit: 50 }),
-    tools.query('actions', { orderBy: 'createdAt', orderDir: 'desc', limit: 50 }),
-    tools.query('audit-events', { orderBy: 'timestamp', orderDir: 'desc', limit: 100 }),
+    tools.query('resources', { where: { workspaceId }, limit: 50 }),
+    tools.query('actions', { where: { workspaceId }, orderBy: 'createdAt', orderDir: 'desc', limit: 50 }),
+    tools.query('audit-events', { where: { workspaceId }, orderBy: 'timestamp', orderDir: 'desc', limit: 100 }),
   ])
   if (!resources.success || !actions.success || !audits.success) {
     return { success: false, error: 'Application state is temporarily unavailable.' }
@@ -208,8 +225,8 @@ export const actions: Record<string, ActionHandler<Env>> = {
 }
 
 export type PolicyResolution = { policy: Policy; reason: 'SELECTED' } | { policy: null; reason: 'NO_APPLICABLE_POLICY' | 'AMBIGUOUS_POLICY' }
-export async function resolvePolicy(tools: ActionTools, env: Env, resourceId: string): Promise<PolicyResolution> {
-  const result = await tools.query('policies', { limit: 500 })
+export async function resolvePolicy(tools: ActionTools, env: Env, workspaceId: string, resourceId: string): Promise<PolicyResolution> {
+  const result = await tools.query('policies', { where: { workspaceId }, limit: 500 })
   if (!result.success) throw new Error(result.error)
   const records = (result.data as { records?: Array<{ data?: unknown }> }).records ?? []
   const active = records.flatMap((record) => {
@@ -225,10 +242,10 @@ export async function resolvePolicy(tools: ActionTools, env: Env, resourceId: st
   return applicable.length === 0 ? { policy: null, reason: 'NO_APPLICABLE_POLICY' } : { policy: null, reason: 'AMBIGUOUS_POLICY' }
 }
 
-async function recordResolutionDenial(tools: ActionTools, env: Env, resourceId: string, actor: string, reason: 'NO_APPLICABLE_POLICY' | 'AMBIGUOUS_POLICY' | 'RESOURCE_TELEMETRY_STALE') {
+async function recordResolutionDenial(tools: ActionTools, env: Env, workspaceId: string, resourceId: string, actor: string, reason: 'NO_APPLICABLE_POLICY' | 'AMBIGUOUS_POLICY' | 'RESOURCE_TELEMETRY_STALE' | 'RESOURCE_NOT_MONITORED') {
   const now = new Date().toISOString(); const id = `action-${crypto.randomUUID()}`
   const decision: PolicyDecision = { decision: 'DENIED', policyVersion: 'UNRESOLVED', reason, checks: [{ name: 'policy_resolution', passed: false, detail: reason }], timestamp: now, dailyRemaining: 0 }
-  const store = new DeepSpaceOperationsStore(tools, env)
+  const store = new DeepSpaceOperationsStore(tools, env, workspaceId)
   const action = { id, agentId: 'infrastructure-agent', resourceId, actionIntent: { resourceId, actionType: 'purchase_storage' }, reasoning: '', decisionSummary: `Evaluation stopped: ${reason}.`, policyDecision: decision, executionStatus: 'POLICY_DENIED' as const, auditStatus: 'COMPLETE' as const, createdAt: now }
   await store.recordPolicyDecision(action); await store.recordAction(action)
   await store.appendAudit({ id: `audit-${crypto.randomUUID()}`, timestamp: now, actor, eventType: 'POLICY_DENIED', actionId: id, resourceId, details: { reason } })

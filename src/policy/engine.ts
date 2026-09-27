@@ -17,6 +17,8 @@ export type PolicyEvaluationInput = {
   providerId?: string
   authorizationScope?: string
   destination?: string
+  globalAutonomyEnabled?: boolean
+  workspaceId?: string
 }
 
 export function evaluatePolicy(input: PolicyEvaluationInput): PolicyDecision {
@@ -43,15 +45,19 @@ export function evaluatePolicy(input: PolicyEvaluationInput): PolicyDecision {
   const checks = buildChecks(intent, policy, input.spentToday)
   checks.push(check('provider_allowed', policy.allowedProviders.includes(input.providerId ?? 'xrpl-testnet'), 'Execution provider is allowed by policy.', 'Execution provider is not allowed by policy.'))
   checks.push(check('authorization_scope', policy.authorizationScopes.includes(input.authorizationScope ?? 'infrastructure:purchase'), 'Authorization scope is allowed.', 'Authorization scope is not allowed.'))
-  checks.push(check('destination_configured', Boolean(input.destination ?? intent.vendor), 'Protected destination is configured.', 'Protected destination is not configured.'))
+  checks.push(check('destination_configured', Boolean(input.destination), 'Protected destination is configured.', 'Protected destination is not configured.'))
   if (input.resource) {
     const age = Math.max(0, (Date.now() - new Date(input.resource.lastUpdated).getTime()) / 1000)
     checks.push(check('fresh_telemetry', (input.resource.source === 'newrelic' && input.resource.telemetryStatus === 'LIVE' && age <= policy.maxTelemetryAgeSeconds) || (input.allowDemo === true && input.resource.source === 'demo'), 'Verified telemetry is fresh for this mode.', 'Verified live telemetry is missing or stale.'))
     checks.push(check('action_threshold', input.resource.metrics.storageUtilization !== undefined && input.resource.metrics.storageUtilization >= 80, 'Storage utilization reached the 80% action threshold.', 'Storage utilization is unavailable or below the 80% action threshold.'))
     checks.push(check('resource_identity', input.resource.id === intent.resourceId, 'Intent targets the observed resource.', 'Intent resource differs from observed telemetry.'))
+    checks.push(check('workspace_valid', Boolean(input.workspaceId) && input.resource.workspaceId === input.workspaceId, 'Resource belongs to the authorized workspace.', 'Resource does not belong to the authorized workspace.'))
+    checks.push(check('monitoring_enabled', input.resource.monitoringEnabled === true, 'Resource monitoring is enabled.', 'Resource monitoring is disabled.'))
+    checks.push(check('resource_autonomy_enabled', input.resource.autonomousEnabled === true, 'Resource autonomy is enabled.', 'Resource autonomy is disabled.'))
   } else {
     checks.push(check('fresh_telemetry', false, '', 'Verified telemetry is missing.'))
   }
+  checks.push(check('global_autonomy_enabled', input.globalAutonomyEnabled === true, 'Global autonomy is enabled.', 'Global autonomy is disabled.'))
   const failures = checks.filter((check) => !check.passed)
   if (failures.length > 0) {
     return deny(

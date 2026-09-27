@@ -6,6 +6,7 @@ import {
 } from '../domain/operations'
 import type { ResearchProvider, ResearchResult } from '../research/tavily'
 import { forecastStorage, type TrendForecast } from '../telemetry/trend'
+import { z } from 'zod/v4'
 
 export type AgentObservation = {
   resource: InfrastructureResource
@@ -15,7 +16,11 @@ export type AgentObservation = {
 }
 
 export type AgentProposal = {
-  reasoning: string
+  summary: {
+    summary: string
+    action: 'purchase_storage'
+    evidence: string[]
+  }
   intent: ActionIntent
   research?: ResearchResult
 }
@@ -49,20 +54,30 @@ export class AgentRuntime {
       await onResearch?.(research)
     }
 
-    const raw = await this.model.propose({ resource, trend, forecast: forecastStorage(trend), research }, signal)
+    const raw = await this.model.propose({
+      resource,
+      trend,
+      forecast: forecastStorage(trend),
+      ...(research?.status === 'RESEARCH_COMPLETE' ? { research } : {}),
+    }, signal)
     const candidate = normalizeProposal(raw)
     const intent = actionIntentSchema.parse(candidate.intent)
-    return { reasoning: candidate.reasoning, intent, research }
+    return { summary: candidate.summary, intent, research }
   }
 }
 
-function normalizeProposal(raw: unknown): { reasoning: string; intent: unknown } {
+const summarySchema = z.object({
+  summary: z.string().trim().min(10).max(500),
+  action: z.literal('purchase_storage'),
+  evidence: z.array(z.string().trim().min(1).max(500)).min(1).max(20),
+}).strict()
+
+function normalizeProposal(raw: unknown): { summary: z.infer<typeof summarySchema>; intent: unknown } {
   const parsed = typeof raw === 'string' ? parseJson(raw) : raw
-  if (!isObject(parsed) || typeof parsed.reasoning !== 'string' || !('intent' in parsed)) {
-    throw new Error('Model response did not contain a valid reasoning and intent envelope.')
+  if (!isObject(parsed) || !('summary' in parsed) || !('intent' in parsed)) {
+    throw new Error('Model response did not contain a valid summary and intent envelope.')
   }
-  if (parsed.reasoning.length > 4000) throw new Error('Model reasoning exceeds the allowed length.')
-  return { reasoning: parsed.reasoning, intent: parsed.intent }
+  return { summary: summarySchema.parse(parsed.summary), intent: parsed.intent }
 }
 
 function parseJson(value: string): unknown {
@@ -84,9 +99,13 @@ export class DemoAgentModel implements AgentModel {
     const { resource, trend } = observation
     const values = trend.points.map((point) => point.value)
     return {
-      reasoning: this.attack
-        ? 'This intentionally malicious proposal demonstrates that model output has no authority.'
-        : `Storage utilization increased from ${values[0]}% to ${values.at(-1)}%; bounded capacity procurement is warranted.`,
+      summary: {
+        summary: this.attack
+          ? 'The model proposed an amount above the configured transaction ceiling.'
+          : 'Storage exceeded the configured remediation threshold and continues to increase.',
+        action: 'purchase_storage',
+        evidence: ['storage_utilization'],
+      },
       intent: {
         id: `intent-${crypto.randomUUID()}`,
         agentId: 'infrastructure-agent',

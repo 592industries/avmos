@@ -1,43 +1,121 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import { getAuthToken, signOut, useQuery, useUser } from 'deepspace'
+import { signOut, useQuery, useUser } from 'deepspace'
 import { Button } from '@/components/ui'
 import { ConsoleShell, StatusPill, relative } from '@/components/console-data'
+import { useWorkspace } from '@/workspace-context'
 
-type Health = { status:string; services:Record<string,boolean>; modes:{autonomous:boolean;settlement:string} }
-type Retention = { collection:string;status:string;deleted:number;oldestExpiresAt?:string;lastRunAt:string;error?:string }
+type Health = { services: Record<string, boolean>; modes: { autonomous: boolean; settlement: string } }
+type Retention = { workspaceId: string; collection: string; status: string; deleted: number; lastRunAt: string }
 type Diagnostics = {
-  identity:{userId:string;displayName?:string;email?:string;provider:string;providerSubjectId:string;workspace:string;role:string;roleSource:string;authenticatedSince?:string}
-  application:{version:string;environment:string;build:string}
-  auth:{status:string;role:string;workspace:string;provider:string}
-  telemetry:{status:string;fleetSize:number;lastPoll?:string;lastPollStatus:string;lastObservation?:string}
-  agent:{status:string;lastEvaluationAt?:string;lastDecision?:string;lastError?:string}
-  policy:{active:number;lastResolution?:string;lastDenialReason?:string}
-  execution:{provider:string;mode:string;lastState?:string;lastReconciliation?:string}
-  database:{status:string;backlog:number;lastCleanup?:string;retention:Retention[]}
-  team:Array<{userId:string;name?:string;email?:string;role?:string}>
+  auth: { status: string; role: string; workspace: string; provider: string }
+  telemetry: { status: string; fleetSize: number; lastPoll?: string; lastObservation?: string }
+  newRelic: { integration: string; credentialSource: string; account?: string | number | null; discovery: string; hostsDiscovered: number; resourcesStored: number; lastSuccessfulPoll?: string | null; lastPollDurationMs?: number | null; lastTelemetrySample?: string | null; nextScheduledPoll?: string | null }
+  policy: { active: number; lastDenialReason?: string }
+  execution: { mode: string; lastState?: string }
+  database: { status: string; backlog: number; lastCleanup?: string }
+  team: Array<{ userId: string; role?: string }>
 }
-const names:Record<string,string> = {'telemetry-observations':'Telemetry observations','telemetry-aggregates':'Telemetry aggregates','operations-log':'Operations logs',actions:'Actions','policy-decisions':'Policy decisions',alerts:'Alerts','audit-events':'Audit events'}
-const days:Record<string,number> = {'telemetry-observations':7,'telemetry-aggregates':30,'operations-log':7,actions:30,'policy-decisions':90,alerts:30,'audit-events':180}
 
-export default function SettingsPage(){
-  const {user}=useUser(); const [health,setHealth]=useState<Health|null>(null); const [diagnostics,setDiagnostics]=useState<Diagnostics|null>(null)
-  const retention=useQuery<Retention>('retention-status',{limit:20})
-  useEffect(()=>{let active=true;void(async()=>{const token=await getAuthToken();if(!token)return;const [h,d]=await Promise.all([fetch('/api/health',{headers:{Authorization:`Bearer ${token}`}}),user?.role==='admin'?fetch('/api/admin/diagnostics',{headers:{Authorization:`Bearer ${token}`}}):Promise.resolve(null)]);if(h.ok&&active)setHealth(await h.json());if(d?.ok&&active)setDiagnostics(await d.json())})();return()=>{active=false}},[user?.role])
-  const latest=retention.records.map(r=>r.data.lastRunAt).sort().at(-1); const backlog=retention.records.filter(r=>r.data.status==='BACKLOG').length
-  return <ConsoleShell eyebrow="CONTROL PLANE" title="Settings" description="Operational configuration, access, retention, and safe diagnostics.">
+export default function SettingsPage() {
+  const { user } = useUser()
+  const workspace = useWorkspace()
+  const [health, setHealth] = useState<Health | null>(null)
+  const [diagnostics, setDiagnostics] = useState<Diagnostics | null>(null)
+  const [newWorkspaceName, setNewWorkspaceName] = useState('')
+  const [notice, setNotice] = useState('')
+  const retention = useQuery<Retention>('retention-status', { limit: 100 })
+  const scopedRetention = retention.records.filter((row) => row.data.workspaceId === workspace.workspaceId)
+
+  useEffect(() => {
+    let active = true
+    void (async () => {
+      const headers = await workspace.headers()
+      const [healthResponse, diagnosticsResponse] = await Promise.all([
+        fetch('/api/health', { headers }),
+        workspace.workspace?.role === 'admin' ? fetch('/api/admin/diagnostics', { headers }) : Promise.resolve(null),
+      ])
+      if (active && healthResponse.ok) setHealth(await healthResponse.json())
+      if (active && diagnosticsResponse?.ok) setDiagnostics(await diagnosticsResponse.json())
+    })()
+    return () => { active = false }
+  }, [workspace.workspaceId, workspace.workspace?.role])
+
+  async function createWorkspace() {
+    try {
+      await workspace.createWorkspace(newWorkspaceName)
+      setNewWorkspaceName('')
+      setNotice('Workspace created.')
+    } catch {
+      setNotice('Workspace could not be created.')
+    }
+  }
+
+  return <ConsoleShell eyebrow="CONTROL PLANE" title="Settings" description="Workspace, security, telemetry, retention, execution, and diagnostics.">
+    {notice && <p className="console-notice">{notice}</p>}
     <div className="settings-sections">
-      <Section title="General"><Row label="Workspace" value={diagnostics?.identity.workspace??'AVMOS'}/><Row label="Account" value={user?.name??user?.email??'—'}/><Row label="Account role" value={<StatusPill status={(user?.role??'unknown').toUpperCase()}/>}/></Section>
-      <Section title="Services">{Object.entries(health?.services??{}).map(([name,value])=><Row key={name} label={serviceName(name)} value={<StatusPill status={value?'CONFIGURED':'NOT CONFIGURED'}/>}/>)}</Section>
-      <Section title="Automation"><Row label="Autonomous runs" value={<StatusPill status={health?.modes.autonomous?'ENABLED':'DISABLED'}/>}/><Row label="Execution mode" value={<StatusPill status={health?.modes.settlement??'UNKNOWN'}/>}/><Row label="Safety state" value="Deterministic policy required before execution"/></Section>
-      <Section title="Security"><Row label="Authentication" value={<StatusPill status={diagnostics?.auth.status??'AUTHENTICATED'}/>}/><Row label="Effective role" value={<StatusPill status={(user?.role??'unknown').toUpperCase()}/>}/><Row label="Role source" value={diagnostics?.identity.roleSource??'Workspace membership'}/>{diagnostics&&<><Row label="Identity provider" value={diagnostics.identity.provider}/><Row label="Provider subject" value={diagnostics.identity.providerSubjectId}/><Row label="Authenticated" value={diagnostics.identity.authenticatedSince?relative(diagnostics.identity.authenticatedSince):'Unavailable'}/></>}<Button variant="secondary" onClick={()=>signOut()}>Sign out</Button></Section>
-      <Section title="Retention" wide><div className="retention-summary"><div><span>Retention engine</span><StatusPill status={backlog?'BACKLOG':'HEALTHY'}/></div><div><span>Last cleanup</span><strong>{latest?new Date(latest).toLocaleTimeString():'Not run'}</strong></div><div><span>Next scheduled cleanup</span><strong>~1 hour</strong></div><div><span>Cleanup backlog</span><strong>{backlog} collections</strong></div></div><div className="table-scroll"><table className="console-table retention-table"><thead><tr><th>Collection</th><th>Retention</th><th>Last cleanup</th><th>Deleted</th><th>Status</th></tr></thead><tbody>{Object.keys(days).map(collection=>{const row=retention.records.find(r=>r.data.collection===collection)?.data;return <tr key={collection}><td>{names[collection]}</td><td>{days[collection]} days</td><td>{row?new Date(row.lastRunAt).toLocaleTimeString():'Not run'}</td><td>{row?.deleted??0} deleted</td><td><StatusPill status={row?.status==='CURRENT'?'HEALTHY':row?.status??'HEALTHY'}/></td></tr>})}</tbody></table></div></Section>
-      {user?.role==='admin'&&<><Section title="Identity / access" wide>{diagnostics?<div className="identity-grid"><Row label="Current user" value={diagnostics.identity.displayName??diagnostics.identity.userId}/><Row label="Email" value={diagnostics.identity.email??'Unavailable'}/><Row label="Provider" value={diagnostics.identity.provider}/><Row label="Provider subject ID" value={diagnostics.identity.providerSubjectId}/><Row label="Workspace" value={diagnostics.identity.workspace}/><Row label="Effective role" value={diagnostics.identity.role.toUpperCase()}/><Row label="Role source" value={diagnostics.identity.roleSource}/></div>:<p className="console-empty">Loading identity diagnostics…</p>}</Section>
-      <Section title="Diagnostics" wide>{diagnostics?<div className="diagnostic-grid"><Diag title="Application" status={diagnostics.application.build} lines={[`Version ${diagnostics.application.version}`,diagnostics.application.environment]}/><Diag title="Auth" status={diagnostics.auth.status} lines={[`${diagnostics.auth.role.toUpperCase()} · ${diagnostics.auth.provider}`,diagnostics.auth.workspace]}/><Diag title="Telemetry" status={diagnostics.telemetry.status} lines={[`${diagnostics.telemetry.fleetSize} fleet resources`,diagnostics.telemetry.lastPoll?`Poll ${diagnostics.telemetry.lastPollStatus} · ${relative(diagnostics.telemetry.lastPoll)}`:'No poll recorded',diagnostics.telemetry.lastObservation?`Observation ${relative(diagnostics.telemetry.lastObservation)}`:'No observations']}/><Diag title="Agent" status={diagnostics.agent.status} lines={[diagnostics.agent.lastDecision??'No decision recorded',diagnostics.agent.lastEvaluationAt?relative(diagnostics.agent.lastEvaluationAt):'No evaluation',diagnostics.agent.lastError??'No recorded error']}/><Diag title="Policy" status={diagnostics.policy.active?'HEALTHY':'ATTENTION'} lines={[`${diagnostics.policy.active} active policies`,diagnostics.policy.lastResolution??'No resolution',diagnostics.policy.lastDenialReason??'No recent denial']}/><Diag title="Execution" status={diagnostics.execution.lastState??diagnostics.execution.mode} lines={[`${diagnostics.execution.provider} · ${diagnostics.execution.mode}`,diagnostics.execution.lastReconciliation?`Reconciliation ${relative(diagnostics.execution.lastReconciliation)}`:'No reconciliation pending']}/><Diag title="Database" status={diagnostics.database.status} lines={[`${diagnostics.database.backlog} cleanup backlogs`,diagnostics.database.lastCleanup?`Cleanup ${relative(diagnostics.database.lastCleanup)}`:'No cleanup recorded']}/></div>:<p className="console-empty">Loading administrator diagnostics…</p>}</Section>
-      <Section title="Team" wide>{diagnostics?.team.length?<div className="table-scroll"><table className="console-table"><thead><tr><th>User</th><th>Email</th><th>Role</th></tr></thead><tbody>{diagnostics.team.map(member=><tr key={member.userId}><td>{member.name??member.userId}</td><td>{member.email??'Unavailable'}</td><td><StatusPill status={(member.role??'member').toUpperCase()}/></td></tr>)}</tbody></table></div>:<p className="console-empty">No team records are available.</p>}</Section></>}
+      <Section title="Workspace">
+        <Row label="Current workspace" value={workspace.workspace?.name ?? workspace.workspaceId}/>
+        <label><span>Select workspace</span><select value={workspace.workspaceId} onChange={(event) => workspace.selectWorkspace(event.target.value)}>{workspace.workspaces.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
+        <label><span>Create workspace</span><input value={newWorkspaceName} onChange={(event) => setNewWorkspaceName(event.target.value)} placeholder="Workspace name"/></label>
+        <Button disabled={newWorkspaceName.trim().length < 2} onClick={() => void createWorkspace()}>Create workspace</Button>
+      </Section>
+      <Section title="Members">
+        <Row label="Your role" value={<StatusPill status={(workspace.workspace?.role ?? 'member').toUpperCase()}/>}/>
+        <Row label="Active members" value={diagnostics?.team.length ?? 'Available to workspace administrators'}/>
+      </Section>
+      <Section title="Security">
+        <Row label="Authentication" value={<StatusPill status={diagnostics?.auth.status ?? 'AUTHENTICATED'}/>}/>
+        <Row label="Account" value={user?.name ?? user?.email ?? '—'}/>
+        <Row label="Credential handling" value="Encrypted server-side; never returned"/>
+        <Button variant="secondary" onClick={() => signOut()}>Sign out</Button>
+      </Section>
+      <Section title="Telemetry">
+        <Row label="New Relic" value={<StatusPill status={diagnostics?.newRelic.integration ?? (health?.services.newRelic ? 'CONNECTED' : 'DISCONNECTED')}/>}/>
+        <Row label="Discovery" value={<StatusPill status={diagnostics?.newRelic.discovery ?? 'NEVER_RUN'}/>}/>
+        <Row label="Telemetry" value={<StatusPill status={diagnostics?.telemetry.status ?? 'UNAVAILABLE'}/>}/>
+        <Row label="Last sample" value={diagnostics?.newRelic.lastTelemetrySample ? relative(diagnostics.newRelic.lastTelemetrySample) : 'Never'}/>
+      </Section>
+      <Section title="Execution Mode">
+        <Row label="Global autonomous ceiling" value={<StatusPill status={health?.modes.autonomous ? 'ENABLED' : 'DISABLED'}/>}/>
+        <Row label="XRPL" value={<StatusPill status={health?.modes.settlement ?? 'SIMULATED'}/>}/>
+        <Row label="Authority boundary" value="Policy approval required"/>
+      </Section>
+      <Section title="Retention">
+        <Row label="Collections" value={scopedRetention.length}/>
+        <Row label="Backlog" value={scopedRetention.filter((row) => row.data.status === 'BACKLOG').length}/>
+        <Row label="Last cleanup" value={scopedRetention.map((row) => row.data.lastRunAt).sort().at(-1) ? relative(scopedRetention.map((row) => row.data.lastRunAt).sort().at(-1)) : 'Never'}/>
+      </Section>
+      <Section title="Email Notifications"><Row label="Status" value={<StatusPill status="COMING SOON"/>}/></Section>
+      {workspace.workspace?.role === 'admin' && <Section title="Diagnostics" wide>
+        {diagnostics ? <div className="diagnostic-grid">
+          <Diag title="New Relic integration" status={diagnostics.newRelic.integration} lines={[
+            `Credential source: ${diagnostics.newRelic.credentialSource}`,
+            `Account: ${diagnostics.newRelic.account ?? 'Unavailable'}`,
+            `Discovery: ${diagnostics.newRelic.discovery}`,
+            `Hosts discovered: ${diagnostics.newRelic.hostsDiscovered}`,
+            `Resources stored: ${diagnostics.newRelic.resourcesStored}`,
+            diagnostics.newRelic.lastSuccessfulPoll ? `Last poll: ${relative(diagnostics.newRelic.lastSuccessfulPoll)}` : 'Last poll: Never',
+            diagnostics.newRelic.lastPollDurationMs != null ? `Poll duration: ${diagnostics.newRelic.lastPollDurationMs}ms` : 'Poll duration: —',
+            diagnostics.newRelic.nextScheduledPoll ? `Next poll: ${relative(diagnostics.newRelic.nextScheduledPoll)}` : 'Next poll: —',
+          ]}/>
+          <Diag title="Telemetry" status={diagnostics.telemetry.status} lines={[`${diagnostics.telemetry.fleetSize} resources`, diagnostics.telemetry.lastObservation ? `Sample ${relative(diagnostics.telemetry.lastObservation)}` : 'No sample']}/>
+          <Diag title="Policy" status={diagnostics.policy.active ? 'HEALTHY' : 'ATTENTION'} lines={[`${diagnostics.policy.active} active`, diagnostics.policy.lastDenialReason ?? 'No recent denial']}/>
+          <Diag title="Execution" status={diagnostics.execution.lastState ?? diagnostics.execution.mode} lines={[diagnostics.execution.mode]}/>
+          <Diag title="Database" status={diagnostics.database.status} lines={[`${diagnostics.database.backlog} cleanup backlogs`]}/>
+        </div> : <p>Loading diagnostics…</p>}
+      </Section>}
     </div>
   </ConsoleShell>
 }
-function Section({title,wide=false,children}:{title:string;wide?:boolean;children:ReactNode}){return <section className={`settings-section ${wide?'wide':''}`}><header><p>{title.toUpperCase()}</p></header>{children}</section>}
-function Row({label,value}:{label:string;value:ReactNode}){return <div className="settings-row"><span>{label}</span><strong>{value}</strong></div>}
-function Diag({title,status,lines}:{title:string;status:string;lines:string[]}){return <article><header><strong>{title}</strong><StatusPill status={status}/></header>{lines.map((line,index)=><p key={`${index}:${line}`}>{line}</p>)}</article>}
-function serviceName(value:string){return({newRelic:'New Relic',grok:'Grok',tavily:'Tavily',xrplDestination:'XRPL'} as Record<string,string>)[value]??value}
+
+function Section({ title, wide = false, children }: { title: string; wide?: boolean; children: ReactNode }) {
+  return <section className={`settings-section ${wide ? 'wide' : ''}`}><header><p>{title.toUpperCase()}</p></header>{children}</section>
+}
+
+function Row({ label, value }: { label: string; value: ReactNode }) {
+  return <div className="settings-row"><span>{label}</span><strong>{value}</strong></div>
+}
+
+function Diag({ title, status, lines }: { title: string; status: string; lines: string[] }) {
+  return <article><header><strong>{title}</strong><StatusPill status={status}/></header>{lines.map((line) => <p key={line}>{line}</p>)}</article>
+}

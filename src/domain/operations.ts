@@ -1,7 +1,7 @@
 import { z } from 'zod/v4'
 
 export const CURRENCY = 'RLUSD' as const
-export const telemetryStatuses = ['LIVE', 'STALE', 'OFFLINE', 'UNAVAILABLE', 'ERROR', 'DEMO'] as const
+export const telemetryStatuses = ['LIVE', 'STALE', 'UNAVAILABLE', 'ERROR', 'DEMO'] as const
 export type TelemetryStatus = (typeof telemetryStatuses)[number]
 export const telemetryMetrics = ['cpu_utilization', 'memory_utilization', 'storage_utilization', 'network_receive_bytes_per_second', 'network_transmit_bytes_per_second'] as const
 export type TelemetryMetric = (typeof telemetryMetrics)[number]
@@ -41,6 +41,9 @@ export type ActionIntent = z.infer<typeof actionIntentSchema>
 
 export const infrastructureResourceSchema = z.object({
   id: z.string().min(1),
+  workspaceId: z.string().min(1).optional(),
+  provider: z.enum(['new_relic', 'demo']).optional(),
+  externalId: z.string().min(1).optional(),
   hostname: z.string().min(1),
   type: z.string().min(1),
   status: z.enum(['online', 'warning', 'critical', 'offline', 'unknown']),
@@ -57,12 +60,29 @@ export const infrastructureResourceSchema = z.object({
   lastUpdated: z.string().datetime(),
   receivedAt: z.string().datetime().optional(),
   sourceEntityId: z.string().optional(),
-  telemetryStatus: z.enum(['LIVE', 'STALE', 'OFFLINE', 'UNAVAILABLE', 'ERROR', 'DEMO']).optional(),
+  telemetryStatus: z.enum(['LIVE', 'STALE', 'UNAVAILABLE', 'ERROR', 'DEMO']).optional(),
   freshnessSeconds: z.number().nonnegative().optional(),
   source: z.enum(['newrelic', 'demo']),
+  monitoringEnabled: z.boolean().optional(),
+  autonomousEnabled: z.boolean().optional(),
 })
 
 export type InfrastructureResource = z.infer<typeof infrastructureResourceSchema>
+
+export function canonicalResourceId(
+  workspaceId: string,
+  provider: string,
+  externalId: string,
+): string {
+  const digestInput = `${workspaceId}\u0000${provider}\u0000${externalId}`
+  let hash = 2166136261
+  for (let index = 0; index < digestInput.length; index += 1) {
+    hash ^= digestInput.charCodeAt(index)
+    hash = Math.imul(hash, 16777619)
+  }
+  const safeHost = externalId.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^-|-$/g, '').slice(0, 80) || 'resource'
+  return `resource-${(hash >>> 0).toString(16).padStart(8, '0')}-${safeHost}`
+}
 
 export const telemetryTrendSchema = z.object({
   resourceId: z.string().min(1),
@@ -125,6 +145,10 @@ export type PolicyDecision =
     }
 
 export const auditEventTypes = [
+  'TELEMETRY_RECEIVED',
+  'OBSERVATION_CREATED',
+  'VERIFICATION_COMPLETED',
+  'MODEL_PROPOSAL_CREATED',
   'OBSERVATION',
   'REASONING',
   'RESEARCH_PENDING',
@@ -154,6 +178,7 @@ export const auditEventTypes = [
   'INTEGRATION_VERIFIED',
   'INTEGRATION_TEST_FAILED',
   'INTEGRATION_CONFIG_CLEARED',
+  'RESOURCE_CONTROLS_UPDATED',
 ] as const
 
 export type AuditEventType = (typeof auditEventTypes)[number]

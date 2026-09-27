@@ -17,12 +17,31 @@ const validIntent = (overrides: Partial<ActionIntent> = {}): ActionIntent => ({
   metadata: {},
   ...overrides,
 })
-const validResource = (): InfrastructureResource => ({ id: 'avmos', hostname: 'avmos', type: 'server', status: 'critical', metrics: { storageUtilization: 91 }, alerts: [], lastUpdated: new Date().toISOString(), source: 'newrelic', telemetryStatus: 'LIVE' })
+const validResource = (): InfrastructureResource => ({ id: 'avmos', workspaceId: 'workspace-default', provider: 'new_relic', externalId: 'avmos', hostname: 'avmos', type: 'server', status: 'critical', metrics: { storageUtilization: 91 }, alerts: [], lastUpdated: new Date().toISOString(), source: 'newrelic', telemetryStatus: 'LIVE', monitoringEnabled: true, autonomousEnabled: true })
 
 describe('deterministic policy engine', () => {
   it('approves a valid bounded action', () => {
-    expect(evaluatePolicy({ intent: validIntent(), policy: defaultPolicy(), spentToday: 0, resource: validResource() }).decision)
+    expect(evaluatePolicy({ intent: validIntent(), policy: defaultPolicy(), spentToday: 0, resource: validResource(), workspaceId: 'workspace-default', globalAutonomyEnabled: true, destination: 'rProtectedVendorTestnet' }).decision)
       .toBe('APPROVED')
+  })
+
+  it.each([
+    ['global autonomy', { globalAutonomyEnabled: false }, 'global_autonomy_enabled'],
+    ['resource autonomy', { resource: { ...validResource(), autonomousEnabled: false } }, 'resource_autonomy_enabled'],
+    ['resource monitoring', { resource: { ...validResource(), monitoringEnabled: false } }, 'monitoring_enabled'],
+  ])('denies when %s is disabled', (_name, overrides, failedCheck) => {
+    const decision = evaluatePolicy({
+      intent: validIntent(),
+      policy: defaultPolicy(),
+      spentToday: 0,
+      workspaceId: 'workspace-default',
+      globalAutonomyEnabled: true,
+      resource: validResource(),
+      destination: 'rProtectedVendorTestnet',
+      ...overrides,
+    })
+    expect(decision.decision).toBe('DENIED')
+    expect(decision.checks).toContainEqual(expect.objectContaining({ name: failedCheck, passed: false }))
   })
 
   it('does not authorize spending below the 80% action threshold', () => {
@@ -74,6 +93,19 @@ describe('deterministic policy engine', () => {
     })
     expect(decision.decision).toBe('DENIED')
     expect(decision.reason).toContain('schema validation')
+  })
+
+  it('does not treat a vendor name as a protected destination', () => {
+    const decision = evaluatePolicy({
+      intent: validIntent(),
+      policy: defaultPolicy(),
+      spentToday: 0,
+      resource: validResource(),
+      workspaceId: 'workspace-default',
+      globalAutonomyEnabled: true,
+    })
+    expect(decision.decision).toBe('DENIED')
+    expect(decision.checks).toContainEqual(expect.objectContaining({ name: 'destination_configured', passed: false }))
   })
 
   it('denies stale New Relic evidence', () => {

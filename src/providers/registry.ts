@@ -35,7 +35,7 @@ export type ProviderDefinition = {
 }
 
 export const providerRegistry: ProviderDefinition[] = [
-  { id: 'newrelic', displayName: 'New Relic', category: 'telemetry', capabilities: ['infrastructure-telemetry', 'fleet-discovery'], isImplemented: true, requiresSecrets: ['userKey'], publicFields: ['accountId', 'region', 'fleetPrefix'], supportsTest: true },
+  { id: 'newrelic', displayName: 'New Relic', category: 'telemetry', capabilities: ['infrastructure-telemetry', 'fleet-discovery'], isImplemented: true, requiresSecrets: ['userKey'], publicFields: ['accountId', 'region'], supportsTest: true },
   { id: 'grok', displayName: 'xAI / Grok', category: 'reasoning', capabilities: ['constrained-reasoning'], isImplemented: true, requiresSecrets: ['apiKey'], publicFields: ['model', 'baseUrl'], supportsTest: true },
   { id: 'tavily', displayName: 'Tavily', category: 'research', capabilities: ['remediation-research'], isImplemented: true, requiresSecrets: ['apiKey'], publicFields: [], supportsTest: true },
   { id: 'xrpl', displayName: 'XRPL Testnet', category: 'settlement', capabilities: ['RLUSD', 'purchase_storage'], isImplemented: true, requiresSecrets: ['walletSecret'], publicFields: ['testnetUrl', 'vendorDestination', 'executionMode', 'issuer', 'currency'], supportsTest: true },

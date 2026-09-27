@@ -10,6 +10,7 @@
 import type { CollectionSchema } from 'deepspace/schema'
 import { usersSchema } from './schemas/users-schema'
 import { settingsSchema } from './schemas/admin-schema'
+import { workspaceMembershipsSchema, workspacesSchema } from './schemas/workspace-schema'
 import {
   actionsSchema,
   alertsSchema,
@@ -29,6 +30,8 @@ import {
 export const schemas: CollectionSchema[] = [
   usersSchema,
   settingsSchema,
+  workspacesSchema,
+  workspaceMembershipsSchema,
   agentsSchema,
   resourcesSchema,
   currentTelemetrySchema,

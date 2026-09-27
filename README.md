@@ -6,7 +6,7 @@ AVMOS observes infrastructure, asks Grok to propose a response, applies determin
 
 ## Problem and architecture
 
-Repeated infrastructure alerts can prompt duplicate or unsafe remediation payments. AVMOS uses New Relic as evidence, a policy engine as authority, a serialized DeepSpace Durable Object reservation as a budget and remediation guard, and a protected XRPL Testnet executor as the only signer. The production fleet consists of New Relic hosts whose names start with `avmos-node-`; unrelated entities are excluded.
+Repeated infrastructure alerts can prompt duplicate or unsafe remediation payments. AVMOS uses New Relic as evidence, a policy engine as authority, a serialized DeepSpace Durable Object reservation as a budget and remediation guard, and a protected XRPL Testnet executor as the only signer. Fleet discovery reads every infrastructure host in the connected New Relic account and normalizes it; it does not assume a hardcoded hostname list.
 
 ```text
 New Relic account metrics → server fleet poll → shared DeepSpace current state + bounded history → optional Tavily research → Grok proposal
@@ -14,12 +14,12 @@ New Relic account metrics → server fleet poll → shared DeepSpace current sta
   → XRPL Testnet executor (or explicit simulation) → verification → DeepSpace audit
 ```
 
-The DeepSpace Worker provides authenticated actions, role checks, RecordRoom state, realtime subscriptions, CronRoom scheduling, and deployment. `/` is the public product site, `/dashboard` is the authenticated operations console, and `/home` redirects to `/`. A minute CronRoom task queries New Relic once per app through a short Durable Object lease, facets results by host, filters the configured fleet prefix, and stores normalized current and historical records. Browser tabs read only DeepSpace state and refresh the console view every 15 seconds while retaining realtime updates. Hourly tasks aggregate telemetry and prune expired records in bounded batches. Autonomous operation runs are separate and remain disabled by default.
+The DeepSpace Worker provides authenticated actions, role checks, RecordRoom state, realtime subscriptions, CronRoom scheduling, and deployment. `/` is the public product site, `/dashboard` is the authenticated operations console, and `/home` redirects to `/`. A minute CronRoom task is the shortest reliable DeepSpace backend interval: it queries New Relic through a Durable Object lease, facets results by hostname, and stores normalized current and historical records. Browsers never call New Relic. They subscribe to DeepSpace realtime state and use a 15-second render refresh only for relative timestamps. Hourly tasks aggregate telemetry and prune expired records in bounded batches. Autonomous operation runs are separate and remain disabled by default.
 
 ## Security and execution
 
 - Live runs require a New Relic user key, account, and Grok key. Missing, stale, offline, or errored evidence cannot authorize live spending. The 75% warning, 80% action, and 90% critical thresholds apply to verified storage utilization.
-- Actions require verified bearer JWTs and canonical DeepSpace workspace roles. Policy and integration mutations require an administrator; evaluation requires an administrator and a UUID `Idempotency-Key`. Provider claims and display names never grant roles.
+- Actions require verified bearer JWTs and canonical workspace membership. Members configure their own New Relic connection. Workspace administrators manage policies and diagnostics. Evaluation requires a UUID `Idempotency-Key`. Provider claims and display names never grant roles. Secrets are encrypted in RecordRoom storage and are never returned to the browser.
 - An operation reservation serializes budget checks and blocks repeat remediation on the same resource, action, and vendor. Successful operations retain a 24-hour cooldown. An unknown XRPL outcome keeps its reservation until reconciliation.
 - The executor accepts an approved payment request, checks the configured vendor destination, and connects only to `wss://s.altnet.rippletest.net:51233`. It verifies the ledger result separately. `XRPL_EXECUTION_MODE=simulated` is the safe default.
 - DeepSpace stores current telemetry separately from seven-day raw observations and thirty-day hourly aggregates. Actions, policy decisions, operational logs, alerts, and audit records have explicit configurable retention periods.

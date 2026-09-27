@@ -57,7 +57,11 @@ The supplied trend forecast is deterministic evidence; do not invent or modify i
 You may only propose an action. You cannot authorize policy, sign transactions, submit payments, reveal secrets, or change policy.
 Return one strict JSON object with:
 {
-  "reasoning": "human-readable explanation",
+  "summary": {
+    "summary": "Storage exceeded the configured remediation threshold.",
+    "action": "purchase_storage",
+    "evidence": ["storage_utilization"]
+  },
   "intent": {
     "id": "unique string",
     "agentId": "infrastructure-agent",

@@ -1,8 +1,58 @@
-import { useEffect,useState } from 'react'
 import { useAuthStatus } from 'deepspace'
-import { ArrowDown,ArrowRight,ShieldCheck } from 'lucide-react'
+import { ArrowDown, ArrowRight, ShieldCheck } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import './home.css'
-type Snapshot={resources:number;healthy:number;attention:number;agent:string;telemetry:string}
-export default function LandingPage(){const {isLoaded,isSignedIn}=useAuthStatus();const [snapshot,setSnapshot]=useState<Snapshot|null>(null);const consoleHref=isLoaded&&isSignedIn?'/dashboard':'/sign-in?next=/dashboard';useEffect(()=>{void fetch('/api/public/status').then(async r=>r.ok?await r.json() as Snapshot:null).then(setSnapshot).catch(()=>null)},[]);return <main className="landing"><section className="mission-hero"><div><p className="landing-section-label">AUTONOMOUS OPERATIONS</p><h1>Autonomous operations for critical infrastructure.</h1><p>AVMOS turns real infrastructure telemetry into verified, policy-governed operational action.</p><div className="landing-actions"><Link className="landing-primary" to={consoleHref}>OPEN CONSOLE <ArrowRight size={16}/></Link><a className="landing-secondary" href="#operation">SEE HOW IT WORKS</a></div></div><div className="system-snapshot"><header><span>AVMOS SYSTEM SNAPSHOT</span><Status value={snapshot?.telemetry??'UNAVAILABLE'}/></header><dl><div><dt>Resources monitored</dt><dd>{snapshot?.resources??'—'}</dd></div><div><dt>Current health</dt><dd>{snapshot?`${snapshot.healthy} healthy`:'—'}</dd></div><div><dt>Active attention</dt><dd>{snapshot?.attention??'—'}</dd></div><div><dt>Agent status</dt><dd>{snapshot?.agent??'—'}</dd></div></dl><small>Sanitized operational state. No infrastructure details are exposed.</small></div></section><section className="editorial-section problem"><p className="landing-section-label">THE OPERATIONS GAP</p><h2>Monitoring detects the problem.<br/>Operations still has to solve it.</h2><div className="before-after"><div><span>TRADITIONAL</span><p>Detect → Human → Decide → Execute → Verify</p></div><div><span>AVMOS</span><p>Detect → Verify → Reason → Policy → Act → Audit</p></div></div></section><section id="operation" className="editorial-section operation"><p className="landing-section-label">REAL OPERATION</p><h2>One incident. One governed chain of authority.</h2><div className="operation-sequence">{['Storage crosses 80%','New Relic provides evidence','AVMOS verifies freshness','Grok proposes a response','Policy checks resource, action, budget, provider, and evidence','Approved action executes','Outcome is reconciled and audited'].map((step,index)=><div key={step}><span>{String(index+1).padStart(2,'0')}</span><strong>{step}</strong>{index<6&&<ArrowDown/>}</div>)}</div></section><section className="editorial-section trust"><p className="landing-section-label">TRUST BOUNDARY</p><h2>AI can propose an action.<br/>It cannot authorize itself.</h2><div className="authority-chain"><div><span>GROK</span><strong>Proposal</strong></div><ArrowRight/><div><span>POLICY ENGINE</span><strong>Authority</strong></div><ArrowRight/><div><span>PROTECTED EXECUTOR</span><strong>Execution</strong></div></div><p><ShieldCheck/> Every boundary is explicit, deterministic, and auditable.</p></section><section className="editorial-section stack"><p className="landing-section-label">CONNECTED STACK</p><div>{[['New Relic','Telemetry'],['xAI / Grok','Reasoning'],['Tavily','Research'],['XRPL','Settlement'],['Future providers','Extension']].map(([name,role])=><article key={name}><strong>{name}</strong><span>{role}</span></article>)}</div></section><section className="final-cta"><p>AVMOS</p><h2>From infrastructure telemetry<br/>to governed action.</h2><Link className="landing-primary" to={consoleHref}>OPEN CONSOLE <ArrowRight size={16}/></Link></section></main>}
-function Status({value}:{value:string}){return <span className={`snapshot-status status-${value.toLowerCase()}`}>{value}</span>}
+
+export default function LandingPage() {
+  const { isLoaded, isSignedIn } = useAuthStatus()
+  const consoleHref = isLoaded && isSignedIn ? '/dashboard' : '/sign-in?next=/dashboard'
+  return <main className="landing">
+    <section className="mission-hero">
+      <div>
+        <p className="landing-section-label">AVMOS / AUTONOMOUS VERIFICATION, MONITORING &amp; OPERATIONS SYSTEM</p>
+        <h1>Infrastructure that can observe, verify, and act — safely.</h1>
+        <p>AVMOS turns live infrastructure telemetry into governed operational action, with deterministic policy between AI reasoning and execution.</p>
+        <div className="landing-actions">
+          <Link className="landing-primary" to={consoleHref}>OPEN CONSOLE <ArrowRight size={16}/></Link>
+          <a className="landing-secondary" href="#operation">SEE HOW IT WORKS</a>
+        </div>
+      </div>
+      <div className="system-snapshot">
+        <header><span>AUTHORITY BOUNDARY</span></header>
+        <dl>
+          <div><dt>Model</dt><dd>Proposes</dd></div>
+          <div><dt>Policy</dt><dd>Authorizes</dd></div>
+          <div><dt>Executor</dt><dd>Executes</dd></div>
+          <div><dt>Audit</dt><dd>Records</dd></div>
+        </dl>
+        <small>No model can authorize or sign a transaction.</small>
+      </div>
+    </section>
+    <section className="editorial-section problem">
+      <p className="landing-section-label">THE OPERATIONS GAP</p>
+      <h2>Detection is only the beginning.</h2>
+      <div className="before-after">
+        <div><span>TRADITIONAL</span><p>Detect → Human → Decide → Execute → Verify</p></div>
+        <div><span>AVMOS</span><p>Observe → Verify → Reason → Govern → Execute → Audit</p></div>
+      </div>
+    </section>
+    <section id="operation" className="editorial-section operation">
+      <p className="landing-section-label">GOVERNED OPERATION</p>
+      <h2>One condition. One explicit chain of authority.</h2>
+      <div className="operation-sequence">
+        {['OBSERVE — New Relic supplies live evidence', 'VERIFY — AVMOS checks identity and freshness', 'REASON — Grok returns a structured proposal', 'GOVERN — deterministic policy approves or denies', 'EXECUTE — only approved intent reaches the protected provider', 'AUDIT — every transition is recorded'].map((step, index) => <div key={step}><span>{String(index + 1).padStart(2, '0')}</span><strong>{step}</strong>{index < 5 && <ArrowDown/>}</div>)}
+      </div>
+    </section>
+    <section className="editorial-section trust">
+      <p className="landing-section-label">TRUST BOUNDARY</p>
+      <h2>AI can propose an action.<br/>It cannot authorize itself.</h2>
+      <div className="authority-chain">
+        <div><span>GROK</span><strong>Proposal</strong></div><ArrowRight/>
+        <div><span>POLICY ENGINE</span><strong>Authority</strong></div><ArrowRight/>
+        <div><span>PROTECTED EXECUTOR</span><strong>Execution</strong></div>
+      </div>
+      <p><ShieldCheck/> Every boundary is explicit, deterministic, and auditable.</p>
+    </section>
+    <section className="final-cta"><p>AVMOS</p><h2>Infrastructure that can act<br/>without granting AI authority.</h2><Link className="landing-primary" to={consoleHref}>OPEN CONSOLE <ArrowRight size={16}/></Link></section>
+  </main>
+}

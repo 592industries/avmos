@@ -34,12 +34,13 @@ import type { ActionResult, ActionTools, VerifyResult } from 'deepspace/worker'
 import { actions } from '../actions/index.js'
 import { integrations } from '../integrations.js'
 import type { AppContext, Env } from '../../worker.js'
+import { requireWorkspaceAccess, WorkspaceAccessError, workspaceIdFromRequest } from '../workspaces.js'
 
 type ResolveAuth = (req: Request, env: Env) => Promise<VerifyResult | null>
 
 const ACTION_POLICY = {
-  runAgentCycle: { schema: z.object({ resourceId: z.string().regex(/^avmos-node-\d{2}$/), research: z.boolean().optional() }).strict(), ownerOnly: false, roles: ['admin'], perMinute: 4, idempotencyRequired: true },
-  askOperator: { schema: z.object({ question: z.string().trim().min(1).max(500) }).strict(), ownerOnly: false, roles: ['admin', 'member'], perMinute: 20, idempotencyRequired: false },
+  runAgentCycle: { schema: z.object({ workspaceId: z.string().regex(/^workspace-[a-zA-Z0-9-]{1,100}$/), resourceId: z.string().min(1).max(200), research: z.boolean().optional() }).strict(), ownerOnly: false, roles: ['admin', 'member'], perMinute: 4, idempotencyRequired: true },
+  askOperator: { schema: z.object({ workspaceId: z.string().regex(/^workspace-[a-zA-Z0-9-]{1,100}$/), question: z.string().trim().min(1).max(500) }).strict(), ownerOnly: false, roles: ['admin', 'member'], perMinute: 20, idempotencyRequired: false },
   setupXrplTrustLine: { schema: z.object({}).strict(), ownerOnly: true, roles: ['admin'], perMinute: 1, idempotencyRequired: true },
   reconcileXrplOperation: { schema: z.object({ operationId: z.string().min(1).max(100) }).strict(), ownerOnly: true, roles: ['admin'], perMinute: 4, idempotencyRequired: true },
 } as const
@@ -55,10 +56,19 @@ export function registerActionRoutes(app: Hono<AppContext>, resolveAuth: Resolve
     if (!auth) return error('AUTH_REQUIRED', 'Authentication is required.', requestId, 401)
     const role = await resolveAppRole(c.env, auth.userId)
     if (!role) return error('FORBIDDEN', 'Application membership is required.', requestId, 403)
-    const telemetryConfigured = Boolean(c.env.NEW_RELIC_USER_KEY && c.env.NEW_RELIC_ACCOUNT_ID)
+    const token = c.req.header('Authorization')?.slice(7) ?? ''
+    const tools = createActionTools(c.env, auth.userId, token)
+    let workspace
+    try {
+      workspace = await requireWorkspaceAccess(tools, auth.userId, workspaceIdFromRequest(c.req.raw))
+    } catch (cause) {
+      return error('FORBIDDEN', cause instanceof WorkspaceAccessError ? cause.message : 'Workspace access is required.', requestId, 403)
+    }
+    const integration = await tools.get<{ verificationStatus?: string }>('integration-config', `integration:${workspace.workspaceId}:newrelic`)
+    const telemetryConfigured = integration.success && integration.data.record.data.verificationStatus === 'CONNECTED'
     const reasoningConfigured = Boolean(c.env.GROK_API_KEY)
     const destinationConfigured = Boolean(c.env.XRPL_VENDOR_DESTINATION)
-    return c.json({ requestId, status: telemetryConfigured && reasoningConfigured && destinationConfigured ? 'CONFIGURED' : 'SETUP_REQUIRED', services: { newRelic: telemetryConfigured, grok: reasoningConfigured, tavily: Boolean(c.env.TAVILY_API_KEY), xrplDestination: destinationConfigured }, modes: { autonomous: c.env.AUTONOMOUS_RUNS_ENABLED === 'true', settlement: c.env.XRPL_EXECUTION_MODE === 'live' ? 'TESTNET' : 'SIMULATED' }, retention: { rawTelemetryDays: Number(c.env.TELEMETRY_RAW_RETENTION_DAYS) || 7, aggregateTelemetryDays: Number(c.env.TELEMETRY_AGGREGATE_RETENTION_DAYS) || 30, operationsLogDays: Number(c.env.OPERATIONS_LOG_RETENTION_DAYS) || 7, actionsDays: Number(c.env.ACTION_RETENTION_DAYS) || 30, policyDecisionDays: Number(c.env.POLICY_DECISION_RETENTION_DAYS) || 90, alertsDays: Number(c.env.ALERT_RETENTION_DAYS) || 30, auditDays: Number(c.env.AUDIT_RETENTION_DAYS) || 180 } })
+    return c.json({ requestId, workspaceId: workspace.workspaceId, status: telemetryConfigured && reasoningConfigured && destinationConfigured ? 'CONFIGURED' : 'SETUP_REQUIRED', services: { newRelic: telemetryConfigured, grok: reasoningConfigured, tavily: Boolean(c.env.TAVILY_API_KEY), xrplDestination: destinationConfigured }, modes: { autonomous: c.env.AUTONOMOUS_RUNS_ENABLED === 'true', settlement: c.env.XRPL_EXECUTION_MODE === 'live' ? 'TESTNET' : 'SIMULATED' }, retention: { rawTelemetryDays: Number(c.env.TELEMETRY_RAW_RETENTION_DAYS) || 7, aggregateTelemetryDays: Number(c.env.TELEMETRY_AGGREGATE_RETENTION_DAYS) || 30, operationsLogDays: Number(c.env.OPERATIONS_LOG_RETENTION_DAYS) || 7, actionsDays: Number(c.env.ACTION_RETENTION_DAYS) || 30, policyDecisionDays: Number(c.env.POLICY_DECISION_RETENTION_DAYS) || 90, alertsDays: Number(c.env.ALERT_RETENTION_DAYS) || 30, auditDays: Number(c.env.AUDIT_RETENTION_DAYS) || 180 } })
   })
   app.post('/api/actions/:name', async (c) => {
     const requestId = crypto.randomUUID()

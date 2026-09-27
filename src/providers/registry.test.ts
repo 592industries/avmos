@@ -3,7 +3,8 @@ import { validProviderValues } from './registry'
 
 describe('provider configuration registry', () => {
   it('accepts only controlled New Relic and Grok endpoints', () => {
-    expect(validProviderValues('newrelic', { accountId: '123', region: 'US', fleetPrefix: 'avmos-node-' })).toBe(true)
+    expect(validProviderValues('newrelic', { accountId: '123', region: 'US' })).toBe(true)
+    expect(validProviderValues('newrelic', { accountId: '123', region: 'US', fleetPrefix: 'edge-' })).toBe(true)
     expect(validProviderValues('newrelic', { accountId: '123', region: 'OTHER' })).toBe(false)
     expect(validProviderValues('grok', { baseUrl: 'https://api.x.ai/v1', model: 'grok-4-fast-reasoning' })).toBe(true)
     expect(validProviderValues('grok', { baseUrl: 'https://internal.example.test' })).toBe(false)

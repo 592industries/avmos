@@ -12,7 +12,11 @@ type RecordEnvelope<T> = {
 }
 
 export class DeepSpaceOperationsStore implements OperationsStore {
-  constructor(private readonly tools: ActionTools, private readonly env: Env) {}
+  constructor(
+    private readonly tools: ActionTools,
+    private readonly env: Env,
+    readonly workspaceId = 'workspace-default',
+  ) {}
 
   private async guard(path: string, body: unknown): Promise<Response> {
     const namespace = this.env.RECORD_ROOMS
@@ -36,16 +40,21 @@ export class DeepSpaceOperationsStore implements OperationsStore {
   async getAction(operationId: string): Promise<OperationAction | null> {
     const result = await this.tools.get('actions', operationId)
     if (!result.success) return null
-    const record = (result.data as unknown as { record?: { data?: OperationAction } }).record
-    return record?.data ? { ...record.data, id: operationId } : null
+    const record = (result.data as unknown as { record?: { data?: OperationAction & { workspaceId?: string } } }).record
+    return record?.data && record.data.workspaceId === this.workspaceId ? { ...record.data, id: operationId } : null
   }
 
   async recordResource(resource: InfrastructureResource, trend?: TelemetryTrend, trendStatus?: 'LIVE' | 'DEMO' | 'UNAVAILABLE' | 'ERROR', trendError?: string): Promise<void> {
     const historicalStatus = trendStatus ?? (trend?.source === 'demo' ? 'DEMO' : trend ? 'LIVE' : 'UNAVAILABLE')
+    const previous = await this.tools.get<{ monitoringEnabled?: boolean; autonomousEnabled?: boolean; discoveredAt?: string }>('resources', resource.id)
+    const previousData = previous.success ? previous.data.record?.data : undefined
     await expectSuccess(
       this.tools.create(
         'resources',
         {
+          workspaceId: this.workspaceId,
+          provider: resource.source === 'newrelic' ? 'new_relic' : 'demo',
+          externalId: resource.sourceEntityId ?? resource.hostname,
           hostname: resource.hostname,
           type: resource.type,
           status: resource.status,
@@ -64,6 +73,9 @@ export class DeepSpaceOperationsStore implements OperationsStore {
           lastObservedAt: resource.lastUpdated,
           lastQueryAt: new Date().toISOString(),
           lastQueryStatus: 'SUCCESS',
+          discoveredAt: previousData?.discoveredAt ?? new Date().toISOString(),
+          monitoringEnabled: previousData?.monitoringEnabled ?? false,
+          autonomousEnabled: previousData?.autonomousEnabled ?? false,
         },
         resource.id,
       ),
@@ -74,37 +86,44 @@ export class DeepSpaceOperationsStore implements OperationsStore {
     await this.recordResource(resource)
     const expiration = expiry(retentionDays(this.env).observations)
     for (const observation of observations) {
-      const data = { ...observation, hourBucket: hourBucket(observation.observedAt), ...expiration }
-      await expectSuccess(this.tools.create('current-telemetry', observation, `${observation.resourceId}:${observation.metric}`))
-      await expectSuccess(this.tools.create('telemetry-observations', data, `obs:${observation.resourceId}:${observation.metric}:${Date.parse(observation.observedAt)}`))
+      const scoped = { ...observation, workspaceId: this.workspaceId, externalId: resource.sourceEntityId ?? resource.hostname }
+      const data = { ...scoped, hourBucket: hourBucket(observation.observedAt), ...expiration }
+      await expectSuccess(this.tools.create('current-telemetry', scoped, `${this.workspaceId}:${observation.resourceId}:${observation.metric}`))
+      await expectSuccess(this.tools.create('telemetry-observations', data, `obs:${this.workspaceId}:${observation.resourceId}:${observation.metric}:${Date.parse(observation.observedAt)}`))
     }
     const storage = observations.find((item) => item.metric === 'storage_utilization')
-    if (storage?.value !== undefined && storage.status === 'LIVE') await this.updateStorageAlert(storage)
+    const enrolled = await this.tools.get<{ monitoringEnabled?: boolean }>('resources', resource.id)
+    if (storage?.value !== undefined && storage.status === 'LIVE' && enrolled.success && enrolled.data.record?.data.monitoringEnabled === true) {
+      await this.updateStorageAlert(storage)
+    }
   }
 
   private async updateStorageAlert(observation: TelemetryObservation): Promise<void> {
-    const id = `${observation.resourceId}:storage_utilization`
+    const id = `${this.workspaceId}:${observation.resourceId}:storage_utilization`
     const existing = await this.tools.get<{ status?: string; openedAt?: string }>('alerts', id)
     const current = existing.success ? existing.data.record?.data : undefined
     const severity = observation.value! >= 90 ? 'CRITICAL' : observation.value! >= 75 ? 'WARNING' : 'HEALTHY'
     if (severity !== 'HEALTHY') {
       const now = new Date().toISOString()
-      await expectSuccess(this.tools.create('alerts', { resourceId: observation.resourceId, metric: observation.metric, severity, status: 'ACTIVE', value: observation.value, threshold: severity === 'CRITICAL' ? 90 : 75, openedAt: current?.openedAt ?? now, updatedAt: now, expiresAt: '9999-12-31T23:59:59.999Z', expiresOn: '9999-12-31' }, id))
+      await expectSuccess(this.tools.create('alerts', { workspaceId: this.workspaceId, resourceId: observation.resourceId, metric: observation.metric, severity, status: 'ACTIVE', value: observation.value, threshold: severity === 'CRITICAL' ? 90 : 75, openedAt: current?.openedAt ?? now, updatedAt: now, expiresAt: '9999-12-31T23:59:59.999Z', expiresOn: '9999-12-31' }, id))
     } else if (current?.status === 'ACTIVE') {
       const now = new Date(); await expectSuccess(this.tools.update('alerts', id, { status: 'RESOLVED', severity: 'RESOLVED', value: observation.value, updatedAt: now.toISOString(), resolvedAt: now.toISOString(), ...expiry(retentionDays(this.env).alerts, now) }))
     }
   }
 
-  async recordTelemetryFailure(resourceId: string, status: 'UNAVAILABLE' | 'OFFLINE' | 'ERROR'): Promise<void> {
+  async recordTelemetryFailure(resourceId: string, status: 'UNAVAILABLE' | 'ERROR'): Promise<void> {
     const previous = await this.tools.get('resources', resourceId)
     const data = previous.success
       ? (previous.data as { record?: { data?: Record<string, unknown> } }).record?.data
       : undefined
     const lastObservedAt = typeof data?.lastObservedAt === 'string' ? data.lastObservedAt : new Date(0).toISOString()
     await expectSuccess(this.tools.create('resources', {
-      hostname: resourceId,
+      workspaceId: this.workspaceId,
+      provider: 'new_relic',
+      externalId: typeof data?.externalId === 'string' ? data.externalId : resourceId,
+      hostname: typeof data?.hostname === 'string' ? data.hostname : resourceId,
       type: 'server',
-      status: status === 'OFFLINE' ? 'offline' : 'unknown',
+      status: status === 'UNAVAILABLE' ? 'offline' : 'unknown',
       telemetryStatus: status,
       telemetrySource: 'newrelic',
       historicalStatus: 'UNAVAILABLE',
@@ -118,15 +137,20 @@ export class DeepSpaceOperationsStore implements OperationsStore {
       lastObservedAt,
       lastQueryAt: new Date().toISOString(),
       lastQueryStatus: status,
+      discoveredAt: typeof data?.discoveredAt === 'string' ? data.discoveredAt : new Date().toISOString(),
+      monitoringEnabled: data?.monitoringEnabled === true,
+      autonomousEnabled: data?.autonomousEnabled === true,
     }, resourceId))
     const failedAt = new Date().toISOString()
     for (const metric of ['cpu_utilization', 'memory_utilization', 'storage_utilization', 'network_receive_bytes_per_second', 'network_transmit_bytes_per_second'] as const) {
-      const id = `${resourceId}:${metric}`
+      const id = `${this.workspaceId}:${resourceId}:${metric}`
       const current = await this.tools.get<Record<string, unknown>>('current-telemetry', id)
       const prior = current.success ? current.data.record?.data : undefined
       await expectSuccess(this.tools.create('current-telemetry', {
         ...(prior ?? {}),
+        workspaceId: this.workspaceId,
         resourceId,
+        externalId: typeof data?.externalId === 'string' ? data.externalId : resourceId,
         provider: 'new_relic',
         metric,
         unit: metric.startsWith('network_') ? 'bytes_per_second' : 'percent',
@@ -151,13 +175,14 @@ export class DeepSpaceOperationsStore implements OperationsStore {
       this.tools.create(
         'agents',
         {
+          workspaceId: this.workspaceId,
           name: agent.name,
           status: agent.status,
           modelProvider: agent.modelProvider,
           model: agent.model,
           lastRunAt: agent.lastRunAt,
         },
-        agent.id,
+        `${this.workspaceId}:${agent.id}`,
       ),
     )
   }
@@ -167,6 +192,7 @@ export class DeepSpaceOperationsStore implements OperationsStore {
       this.tools.create(
         'actions',
         {
+          workspaceId: this.workspaceId,
           agentId: action.agentId,
           resourceId: action.resourceId,
           actionIntent: action.actionIntent,
@@ -190,7 +216,7 @@ export class DeepSpaceOperationsStore implements OperationsStore {
 
   async recordPolicyDecision(action: OperationAction): Promise<void> {
     const decidedAt = action.policyDecision.timestamp
-    await expectSuccess(this.tools.create('policy-decisions', { actionId: action.id, resourceId: action.resourceId, policyId: action.policyId ?? 'unknown', ...(action.providerId ? { providerId: action.providerId } : {}), decision: action.policyDecision.decision, checks: action.policyDecision.checks, decidedAt, ...expiry(retentionDays(this.env).decisions, new Date(decidedAt)) }, action.id))
+    await expectSuccess(this.tools.create('policy-decisions', { workspaceId: this.workspaceId, actionId: action.id, resourceId: action.resourceId, policyId: action.policyId ?? 'unknown', ...(action.providerId ? { providerId: action.providerId } : {}), decision: action.policyDecision.decision, checks: action.policyDecision.checks, decidedAt, ...expiry(retentionDays(this.env).decisions, new Date(decidedAt)) }, action.id))
   }
 
   async appendAudit(event: AuditEvent): Promise<void> {
@@ -198,6 +224,7 @@ export class DeepSpaceOperationsStore implements OperationsStore {
       this.tools.create(
         'audit-events',
         {
+          workspaceId: this.workspaceId,
           timestamp: event.timestamp,
           actor: event.actor,
           eventType: event.eventType,
@@ -214,7 +241,7 @@ export class DeepSpaceOperationsStore implements OperationsStore {
   }
 
   async spentToday(): Promise<number> {
-    const result = await this.tools.query('actions', { limit: 500 })
+    const result = await this.tools.query('actions', { where: { workspaceId: this.workspaceId }, limit: 500 })
     if (!result.success) throw new Error(result.error)
     const start = new Date()
     start.setUTCHours(0, 0, 0, 0)

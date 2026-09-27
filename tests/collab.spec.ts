@@ -60,6 +60,65 @@ test('each browser renders its own signed-in account', async ({ users }) => {
   }
 })
 
+test('two members cannot read or configure each other workspaces', async ({ users }) => {
+  const [a, b] = await users(2)
+
+  async function session(page: typeof a.page) {
+    const [workspaceResponse, integrationsResponse] = await Promise.all([
+      page.waitForResponse((response) => response.url().includes('/api/avmos/workspaces') && response.request().method() === 'GET'),
+      page.waitForResponse((response) => response.url().includes('/api/avmos/integrations') && response.request().method() === 'GET'),
+      page.goto('/integrations'),
+    ])
+    const authorization = workspaceResponse.request().headers()['authorization']
+    expect(authorization).toMatch(/^Bearer /)
+    const workspaces = await workspaceResponse.json() as { workspaces: Array<{ id: string }> }
+    expect(workspaces.workspaces.length).toBeGreaterThan(0)
+    const integrations = await integrationsResponse.json() as { workspaceId?: string; providers?: unknown[] }
+    return {
+      id: integrations.workspaceId ?? workspaces.workspaces[0].id,
+      headers: { Authorization: authorization, 'Content-Type': 'application/json' },
+      body: await integrationsResponse.text(),
+    }
+  }
+
+  const [workspaceA, workspaceB] = await Promise.all([session(a.page), session(b.page)])
+  expect(workspaceA.id).not.toBe(workspaceB.id)
+  expect(workspaceA.body).not.toMatch(/NRAK-|walletSecret|Authorization: /i)
+  expect(workspaceA.body).not.toContain('"userKey":')
+
+  const forbidden = await a.page.request.get('/api/avmos/integrations', { headers: { ...workspaceA.headers, 'X-Workspace-Id': workspaceB.id } })
+  expect(forbidden.status()).toBe(403)
+
+  const configureOther = await a.page.request.post('/api/avmos/integrations/newrelic/configure', {
+    headers: { ...workspaceA.headers, 'X-Workspace-Id': workspaceB.id },
+    data: { values: { accountId: '1', region: 'US' }, secrets: { userKey: 'NRAK-SHOULD-NOT-STORE' } },
+  })
+  expect(configureOther.status()).toBe(403)
+
+  const executeOther = await a.page.request.post('/api/actions/runAgentCycle', {
+    headers: { ...workspaceA.headers, 'Idempotency-Key': crypto.randomUUID() },
+    data: { workspaceId: workspaceB.id, resourceId: 'resource-web-01' },
+  })
+  if (executeOther.ok()) {
+    const body = await executeOther.json() as { success?: boolean; error?: string }
+    expect(body.success).toBe(false)
+    expect(body.error).toMatch(/workspace/i)
+  } else {
+    expect([401, 403]).toContain(executeOther.status())
+  }
+})
+
+test('signed-in console shows workspace-scoped navigation', async ({ users }) => {
+  const [user] = await users(1)
+  await user.page.goto('/dashboard')
+  await expect(user.page.getByRole('heading', { name: 'Overview' })).toBeVisible({ timeout: 20_000 })
+  for (const [path, heading] of [['/resources', 'Resources'], ['/alerts', 'Alerts'], ['/activity', 'Activity'], ['/integrations', 'Integrations'], ['/policies', 'Policies'], ['/settings', 'Settings']] as const) {
+    await user.page.goto(path)
+    await expect(user.page.getByRole('heading', { name: heading })).toBeVisible({ timeout: 15_000 })
+    expect(user.page.url()).not.toMatch(/newrelic\.com/)
+  }
+})
+
 test('signed-in dashboard establishes its records WebSocket', async ({ users }) => {
   const [user] = await users(1)
   const socketPromise = user.page.waitForEvent('websocket', {

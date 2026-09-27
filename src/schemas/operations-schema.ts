@@ -1,26 +1,39 @@
 import type { CollectionSchema } from 'deepspace/schema'
 
 const readOnlyPermissions: CollectionSchema['permissions'] = {
-  viewer: { read: true, create: false, update: false, delete: false },
-  member: { read: true, create: false, update: false, delete: false },
+  viewer: { read: false, create: false, update: false, delete: false },
+  member: { read: 'team', create: false, update: false, delete: false },
   admin: { read: true, create: false, update: false, delete: false },
+}
+
+const workspaceIdColumn: CollectionSchema['columns'][number] = {
+  name: 'workspaceId',
+  storage: 'text',
+  interpretation: 'plain',
+  required: true,
+  immutable: true,
 }
 
 export const agentsSchema: CollectionSchema = {
   name: 'agents',
   columns: [
+    workspaceIdColumn,
     { name: 'name', storage: 'text', interpretation: 'plain', required: true },
     { name: 'status', storage: 'text', interpretation: 'plain', required: true },
     { name: 'modelProvider', storage: 'text', interpretation: 'plain', required: true },
     { name: 'model', storage: 'text', interpretation: 'plain', required: true },
     { name: 'lastRunAt', storage: 'text', interpretation: { kind: 'datetime' } },
   ],
+  teamField: 'workspaceId',
   permissions: readOnlyPermissions,
 }
 
 export const resourcesSchema: CollectionSchema = {
   name: 'resources',
   columns: [
+    workspaceIdColumn,
+    { name: 'provider', storage: 'text', interpretation: 'plain', required: true },
+    { name: 'externalId', storage: 'text', interpretation: 'plain', required: true },
     { name: 'hostname', storage: 'text', interpretation: 'plain', required: true },
     { name: 'type', storage: 'text', interpretation: 'plain', required: true },
     { name: 'status', storage: 'text', interpretation: 'plain', required: true },
@@ -39,12 +52,19 @@ export const resourcesSchema: CollectionSchema = {
     { name: 'lastObservedAt', storage: 'text', interpretation: { kind: 'datetime' }, required: true },
     { name: 'lastQueryAt', storage: 'text', interpretation: { kind: 'datetime' } },
     { name: 'lastQueryStatus', storage: 'text', interpretation: 'plain' },
+    { name: 'discoveredAt', storage: 'text', interpretation: { kind: 'datetime' }, required: true },
+    { name: 'monitoringEnabled', storage: 'number', interpretation: { kind: 'boolean' }, required: true },
+    { name: 'autonomousEnabled', storage: 'number', interpretation: { kind: 'boolean' }, required: true },
   ],
+  uniqueOn: ['workspaceId', 'provider', 'externalId'],
+  teamField: 'workspaceId',
   permissions: readOnlyPermissions,
 }
 
 const telemetryColumns: CollectionSchema['columns'] = [
+  workspaceIdColumn,
   { name: 'resourceId', storage: 'text', interpretation: 'plain', required: true },
+  { name: 'externalId', storage: 'text', interpretation: 'plain', required: true },
   { name: 'provider', storage: 'text', interpretation: 'plain', required: true },
   { name: 'metric', storage: 'text', interpretation: 'plain', required: true },
   { name: 'value', storage: 'number', interpretation: 'plain' },
@@ -59,7 +79,7 @@ const telemetryColumns: CollectionSchema['columns'] = [
 
 export const currentTelemetrySchema: CollectionSchema = {
   name: 'current-telemetry', columns: telemetryColumns, permissions: readOnlyPermissions,
-  uniqueOn: ['resourceId', 'metric'],
+  uniqueOn: ['workspaceId', 'resourceId', 'metric'], teamField: 'workspaceId',
 }
 
 export const telemetryObservationsSchema: CollectionSchema = {
@@ -69,12 +89,14 @@ export const telemetryObservationsSchema: CollectionSchema = {
     { name: 'expiresAt', storage: 'text', interpretation: { kind: 'datetime' }, required: true },
     { name: 'expiresOn', storage: 'text', interpretation: 'plain', required: true },
   ],
-  uniqueOn: ['resourceId', 'metric', 'observedAt'], permissions: readOnlyPermissions,
+  uniqueOn: ['workspaceId', 'resourceId', 'metric', 'observedAt'], permissions: readOnlyPermissions,
+  teamField: 'workspaceId',
 }
 
 export const telemetryAggregatesSchema: CollectionSchema = {
   name: 'telemetry-aggregates',
   columns: [
+    workspaceIdColumn,
     { name: 'resourceId', storage: 'text', interpretation: 'plain', required: true },
     { name: 'metric', storage: 'text', interpretation: 'plain', required: true },
     { name: 'unit', storage: 'text', interpretation: 'plain', required: true },
@@ -87,11 +109,13 @@ export const telemetryAggregatesSchema: CollectionSchema = {
     { name: 'status', storage: 'text', interpretation: 'plain', required: true },
     { name: 'expiresAt', storage: 'text', interpretation: { kind: 'datetime' }, required: true },
     { name: 'expiresOn', storage: 'text', interpretation: 'plain', required: true },
-  ], uniqueOn: ['resourceId', 'metric', 'bucketStart'], permissions: readOnlyPermissions,
+  ], uniqueOn: ['workspaceId', 'resourceId', 'metric', 'bucketStart'], permissions: readOnlyPermissions,
+  teamField: 'workspaceId',
 }
 
 export const alertsSchema: CollectionSchema = {
   name: 'alerts', columns: [
+    workspaceIdColumn,
     { name: 'resourceId', storage: 'text', interpretation: 'plain', required: true },
     { name: 'metric', storage: 'text', interpretation: 'plain', required: true },
     { name: 'severity', storage: 'text', interpretation: 'plain', required: true },
@@ -103,11 +127,12 @@ export const alertsSchema: CollectionSchema = {
     { name: 'resolvedAt', storage: 'text', interpretation: { kind: 'datetime' } },
     { name: 'expiresAt', storage: 'text', interpretation: { kind: 'datetime' } },
     { name: 'expiresOn', storage: 'text', interpretation: 'plain' },
-  ], permissions: readOnlyPermissions,
+  ], permissions: readOnlyPermissions, teamField: 'workspaceId',
 }
 
 export const policyDecisionsSchema: CollectionSchema = {
   name: 'policy-decisions', columns: [
+    workspaceIdColumn,
     { name: 'actionId', storage: 'text', interpretation: 'plain', required: true },
     { name: 'resourceId', storage: 'text', interpretation: 'plain', required: true },
     { name: 'policyId', storage: 'text', interpretation: 'plain', required: true },
@@ -117,22 +142,24 @@ export const policyDecisionsSchema: CollectionSchema = {
     { name: 'decidedAt', storage: 'text', interpretation: { kind: 'datetime' }, required: true },
     { name: 'expiresAt', storage: 'text', interpretation: { kind: 'datetime' }, required: true },
     { name: 'expiresOn', storage: 'text', interpretation: 'plain', required: true },
-  ], permissions: readOnlyPermissions,
+  ], permissions: readOnlyPermissions, teamField: 'workspaceId',
 }
 
 export const operationsLogSchema: CollectionSchema = {
   name: 'operations-log', columns: [
+    workspaceIdColumn,
     { name: 'task', storage: 'text', interpretation: 'plain', required: true },
     { name: 'status', storage: 'text', interpretation: 'plain', required: true },
     { name: 'message', storage: 'text', interpretation: 'plain', required: true },
     { name: 'timestamp', storage: 'text', interpretation: { kind: 'datetime' }, required: true },
     { name: 'expiresAt', storage: 'text', interpretation: { kind: 'datetime' }, required: true },
     { name: 'expiresOn', storage: 'text', interpretation: 'plain', required: true },
-  ], permissions: readOnlyPermissions,
+  ], permissions: readOnlyPermissions, teamField: 'workspaceId',
 }
 
 export const retentionStatusSchema: CollectionSchema = {
   name: 'retention-status', columns: [
+    workspaceIdColumn,
     { name: 'collection', storage: 'text', interpretation: 'plain', required: true },
     { name: 'status', storage: 'text', interpretation: 'plain', required: true },
     { name: 'deleted', storage: 'number', interpretation: 'plain', required: true },
@@ -140,24 +167,35 @@ export const retentionStatusSchema: CollectionSchema = {
     { name: 'lastRunAt', storage: 'text', interpretation: { kind: 'datetime' }, required: true },
     { name: 'cursorDate', storage: 'text', interpretation: 'plain' },
     { name: 'error', storage: 'text', interpretation: 'plain' },
-  ], permissions: readOnlyPermissions,
+  ], permissions: readOnlyPermissions, teamField: 'workspaceId',
 }
 
 export const integrationConfigSchema: CollectionSchema = {
   name: 'integration-config', columns: [
+    workspaceIdColumn,
     { name: 'providerId', storage: 'text', interpretation: 'plain', required: true },
     { name: 'publicConfig', storage: 'text', interpretation: { kind: 'json' }, required: true },
     { name: 'verificationStatus', storage: 'text', interpretation: 'plain', required: true },
     { name: 'lastVerifiedAt', storage: 'text', interpretation: { kind: 'datetime' } },
     { name: 'lastError', storage: 'text', interpretation: 'plain' },
+    { name: 'credentialSource', storage: 'text', interpretation: 'plain' },
+    { name: 'discoveryStatus', storage: 'text', interpretation: 'plain', required: true },
+    { name: 'discoveryCount', storage: 'number', interpretation: 'plain', required: true },
+    { name: 'lastDiscoveryAt', storage: 'text', interpretation: { kind: 'datetime' } },
+    { name: 'lastPollAt', storage: 'text', interpretation: { kind: 'datetime' } },
+    { name: 'lastPollDurationMs', storage: 'number', interpretation: 'plain' },
+    { name: 'lastTelemetryAt', storage: 'text', interpretation: { kind: 'datetime' } },
+    { name: 'nextPollAt', storage: 'text', interpretation: { kind: 'datetime' } },
     { name: 'updatedAt', storage: 'text', interpretation: { kind: 'datetime' }, required: true },
     { name: 'updatedBy', storage: 'text', interpretation: 'plain', required: true },
-  ], permissions: readOnlyPermissions,
+  ], permissions: readOnlyPermissions, teamField: 'workspaceId',
+  uniqueOn: ['workspaceId', 'providerId'],
 }
 
 export const policiesSchema: CollectionSchema = {
   name: 'policies',
   columns: [
+    workspaceIdColumn,
     { name: 'id', storage: 'text', interpretation: 'plain', required: true },
     { name: 'name', storage: 'text', interpretation: 'plain' },
     { name: 'version', storage: 'text', interpretation: 'plain', required: true },
@@ -188,16 +226,14 @@ export const policiesSchema: CollectionSchema = {
     { name: 'createdBy', storage: 'text', interpretation: 'plain' },
     { name: 'updatedBy', storage: 'text', interpretation: 'plain' },
   ],
-  permissions: {
-    viewer: { read: true, create: false, update: false, delete: false },
-    member: { read: true, create: false, update: false, delete: false },
-    admin: { read: true, create: false, update: false, delete: false },
-  },
+  teamField: 'workspaceId',
+  permissions: readOnlyPermissions,
 }
 
 export const actionsSchema: CollectionSchema = {
   name: 'actions',
   columns: [
+    workspaceIdColumn,
     { name: 'agentId', storage: 'text', interpretation: 'plain', required: true },
     { name: 'resourceId', storage: 'text', interpretation: 'plain', required: true },
     { name: 'actionIntent', storage: 'text', interpretation: { kind: 'json' }, required: true },
@@ -216,12 +252,14 @@ export const actionsSchema: CollectionSchema = {
     { name: 'expiresAt', storage: 'text', interpretation: { kind: 'datetime' } },
     { name: 'expiresOn', storage: 'text', interpretation: 'plain' },
   ],
+  teamField: 'workspaceId',
   permissions: readOnlyPermissions,
 }
 
 export const auditEventsSchema: CollectionSchema = {
   name: 'audit-events',
   columns: [
+    workspaceIdColumn,
     { name: 'timestamp', storage: 'text', interpretation: { kind: 'datetime' }, required: true },
     { name: 'actor', storage: 'text', interpretation: 'plain', required: true },
     { name: 'eventType', storage: 'text', interpretation: 'plain', required: true },
@@ -233,5 +271,6 @@ export const auditEventsSchema: CollectionSchema = {
     { name: 'expiresAt', storage: 'text', interpretation: { kind: 'datetime' } },
     { name: 'expiresOn', storage: 'text', interpretation: 'plain' },
   ],
+  teamField: 'workspaceId',
   permissions: readOnlyPermissions,
 }

@@ -34,6 +34,7 @@ import {
 } from './src/server/http-routes.js'
 import { registerRealtimeRoutes } from './src/server/realtime-routes.js'
 import { acquirePollLease, allowRequest, lookupOperation, releasePollLease, reserveOperation, transitionOperation } from './src/operations/guard.js'
+import { deleteWorkspaceCredential, readWorkspaceCredential, storeWorkspaceCredential } from './src/security/workspace-credentials.js'
 
 // Dynamic deploy reads this manifest to create the app's DO bindings.
 export const __DO_MANIFEST__ = [
@@ -52,6 +53,34 @@ export class AppRecordRoom extends RecordRoom<Env> {
 
   override async fetch(request: Request): Promise<Response> {
     const path = new URL(request.url).pathname
+    if (path === '/internal/avmos/credential' && request.method === 'POST') {
+      try {
+        const body = await request.json() as {
+          action: 'store' | 'read' | 'delete'
+          workspaceId: string
+          providerId: string
+          secrets?: Record<string, string>
+        }
+        if (!this.env.WORKSPACE_CREDENTIAL_KEY) {
+          return Response.json({ error: 'Workspace credential storage is not configured.' }, { status: 503 })
+        }
+        if (body.action === 'store') {
+          await storeWorkspaceCredential(this.operationState.storage, this.env.WORKSPACE_CREDENTIAL_KEY, body.workspaceId, body.providerId, body.secrets ?? {})
+          return Response.json({ stored: true })
+        }
+        if (body.action === 'read') {
+          const secrets = await readWorkspaceCredential(this.operationState.storage, this.env.WORKSPACE_CREDENTIAL_KEY, body.workspaceId, body.providerId)
+          return Response.json({ secrets })
+        }
+        if (body.action === 'delete') {
+          await deleteWorkspaceCredential(this.operationState.storage, body.workspaceId, body.providerId)
+          return Response.json({ deleted: true })
+        }
+        throw new Error('Invalid credential action.')
+      } catch {
+        return Response.json({ error: 'Invalid credential request.' }, { status: 400 })
+      }
+    }
     if (path === '/internal/avmos/reserve' && request.method === 'POST') {
       try { return Response.json(await reserveOperation(this.operationState.storage, await request.json())) }
       catch { return Response.json({ error: 'Invalid operation reservation.' }, { status: 400 }) }
@@ -164,6 +193,8 @@ export interface Env extends DOBindings<typeof __DO_MANIFEST__> {
   NEW_RELIC_REGION?: string
   NEW_RELIC_RESOURCE_ID?: string
   NEW_RELIC_FLEET_PREFIX?: string
+  /** Encryption root for workspace-scoped provider credentials. */
+  WORKSPACE_CREDENTIAL_KEY?: string
   DEMO_MODE?: string
   ACTIVE_POLICY_ID?: string
   TAVILY_API_KEY?: string

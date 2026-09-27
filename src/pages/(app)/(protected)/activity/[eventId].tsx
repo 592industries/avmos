@@ -1,2 +1,25 @@
-import { useQuery } from 'deepspace';import { useParams } from 'react-router-dom';import { ConsoleShell,Empty,Panel,type AuditRow } from '@/components/console-data'
-export default function ActivityDetail(){const {eventId=''}=useParams();const events=useQuery<AuditRow>('audit-events',{limit:300});const row=events.records.find(r=>r.recordId===eventId)?.data;if(!row)return <ConsoleShell eyebrow="ACTIVITY" title="Not found" description="The requested event is unavailable."><Empty>No matching activity event.</Empty></ConsoleShell>;return <ConsoleShell eyebrow="EVENT DETAIL" title={row.eventType.replaceAll('_',' ')} description={`${row.resourceId} · ${new Date(row.timestamp).toLocaleString()}`}><div className="console-grid"><Panel title="Context"><dl className="detail-list"><div><dt>Actor</dt><dd>{row.actor}</dd></div><div><dt>Action</dt><dd>{row.actionId}</dd></div><div><dt>Policy</dt><dd>{row.policyVersion??'Not applicable'}</dd></div><div><dt>Settlement</dt><dd>{row.transactionHash??'No transaction'}</dd></div></dl></Panel><Panel title="Recorded evidence"><pre className="detail-json">{JSON.stringify(row.details,null,2)}</pre></Panel></div></ConsoleShell>}
+import { useQuery } from 'deepspace'
+import { useParams } from 'react-router-dom'
+import { ConsoleShell, Empty, Panel, type AuditRow } from '@/components/console-data'
+import { useWorkspace } from '@/workspace-context'
+
+export default function ActivityDetail() {
+  const { eventId = '' } = useParams()
+  const workspace = useWorkspace()
+  const events = useQuery<AuditRow & { workspaceId: string }>('audit-events', { limit: 300 })
+  const row = events.records.find((item) => item.recordId === eventId && item.data.workspaceId === workspace.workspaceId)?.data
+  if (!row) return <ConsoleShell eyebrow="ACTIVITY" title="Not found" description="The requested event is unavailable."><Empty>No matching workspace activity event.</Empty></ConsoleShell>
+  return <ConsoleShell eyebrow="EVENT DETAIL" title={row.eventType.replaceAll('_', ' ')} description={`${row.resourceId} · ${new Date(row.timestamp).toLocaleString()}`}>
+    <div className="console-grid">
+      <Panel title="Context">
+        <dl className="detail-list">
+          <div><dt>Actor</dt><dd>{row.actor}</dd></div>
+          <div><dt>Action</dt><dd>{row.actionId}</dd></div>
+          <div><dt>Policy</dt><dd>{row.policyVersion ?? 'Not applicable'}</dd></div>
+          <div><dt>Settlement</dt><dd>{row.transactionHash ?? 'No transaction'}</dd></div>
+        </dl>
+      </Panel>
+      <Panel title="Recorded evidence"><pre className="detail-json">{JSON.stringify(row.details, null, 2)}</pre></Panel>
+    </div>
+  </ConsoleShell>
+}
