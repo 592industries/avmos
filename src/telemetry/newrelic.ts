@@ -6,62 +6,46 @@ export interface TelemetrySource {
   health(resourceId?: string, signal?: AbortSignal): Promise<boolean>
 }
 export type TelemetrySnapshot = { resource: InfrastructureResource; observations: TelemetryObservation[] }
-export type NewRelicConfig = { userKey: string; accountId: number; entityGuid: string; region: 'US' | 'EU' | 'JP'; resourceId: string }
+export type NewRelicConfig = { userKey: string; accountId: number; region: 'US' | 'EU' | 'JP'; fleetPrefix?: string; entityGuid?: string; resourceId?: string }
 const ENDPOINTS = { US: 'https://api.newrelic.com/graphql', EU: 'https://api.eu.newrelic.com/graphql', JP: 'https://api.jp.newrelic.com/graphql' } as const
 
 export class NewRelicTelemetryAdapter implements TelemetrySource {
+  private readonly prefix: string
   constructor(private readonly config: NewRelicConfig) {
-    if (!Number.isSafeInteger(config.accountId) || config.accountId <= 0 || !config.userKey || !config.entityGuid || !ENDPOINTS[config.region]) throw new Error('New Relic configuration is incomplete.')
+    if (!Number.isSafeInteger(config.accountId) || config.accountId <= 0 || !config.userKey || !ENDPOINTS[config.region]) throw new Error('New Relic configuration is incomplete.')
+    this.prefix = config.fleetPrefix ?? 'avmos-node-'
+    if (!/^[a-zA-Z0-9-]{2,40}$/.test(this.prefix)) throw new Error('New Relic fleet prefix is invalid.')
   }
-  async getSnapshot(resourceId: string, signal?: AbortSignal): Promise<TelemetrySnapshot> {
-    this.assertResource(resourceId)
-    const receivedAt = new Date().toISOString()
+  async getFleetSnapshots(signal?: AbortSignal): Promise<TelemetrySnapshot[]> {
+    const receivedAt = new Date().toISOString(); const filter = `hostname LIKE '${escapeNrql(this.prefix)}%'`
     const [system, storage, network] = await Promise.allSettled([
-      this.query(`FROM SystemSample SELECT latest(cpuPercent) AS cpu, latest(memoryUsedPercent) AS memory, latest(timestamp) AS observedAt, latest(hostname) AS hostname WHERE entityGuid = '${escapeNrql(this.config.entityGuid)}' SINCE 10 minutes ago`, signal),
-      this.query(`FROM StorageSample SELECT latest(diskUsedPercent) AS utilization, latest(diskTotalBytes) AS totalBytes, latest(diskUsedBytes) AS usedBytes, latest(timestamp) AS observedAt, latest(hostname) AS hostname FACET mountPoint WHERE entityGuid = '${escapeNrql(this.config.entityGuid)}' SINCE 10 minutes ago LIMIT MAX`, signal),
-      this.query(`FROM NetworkSample SELECT latest(receiveBytesPerSecond) AS received, latest(transmitBytesPerSecond) AS transmitted, latest(timestamp) AS observedAt FACET interfaceName WHERE entityGuid = '${escapeNrql(this.config.entityGuid)}' SINCE 10 minutes ago LIMIT MAX`, signal),
+      this.query(`FROM SystemSample SELECT latest(cpuPercent) AS cpu, latest(memoryUsedPercent) AS memory, latest(timestamp) AS observedAt WHERE ${filter} FACET hostname SINCE 10 minutes ago LIMIT MAX`, signal),
+      this.query(`FROM StorageSample SELECT latest(diskUsedPercent) AS utilization, latest(diskTotalBytes) AS totalBytes, latest(diskUsedBytes) AS usedBytes, latest(timestamp) AS observedAt WHERE ${filter} FACET hostname, mountPoint SINCE 10 minutes ago LIMIT MAX`, signal),
+      this.query(`FROM NetworkSample SELECT latest(receiveBytesPerSecond) AS received, latest(transmitBytesPerSecond) AS transmitted, latest(timestamp) AS observedAt WHERE ${filter} FACET hostname, interfaceName SINCE 10 minutes ago LIMIT MAX`, signal),
     ])
     if (system.status === 'rejected' && storage.status === 'rejected' && network.status === 'rejected') throw new Error('New Relic infrastructure telemetry is unavailable.')
-    const observations: TelemetryObservation[] = []
-    let hostname = resourceId
-    const add = (metric: TelemetryMetric, unit: TelemetryObservation['unit'], value: unknown, observed: unknown, metadata: Record<string, unknown> = {}, forcedStatus?: TelemetryStatus) => {
-      const number = optionalFinite(value); const observedMs = Number(observed)
-      const validTime = Number.isFinite(observedMs) && observedMs > 0 && observedMs <= Date.now() + 30_000
-      const freshnessMs = validTime ? Math.max(0, Date.now() - observedMs) : 0
-      const status: TelemetryStatus = forcedStatus ?? (number === undefined || !validTime ? 'UNAVAILABLE' : freshnessMs > 600_000 ? 'UNAVAILABLE' : freshnessMs > 120_000 ? 'STALE' : 'LIVE')
-      observations.push({ resourceId, provider: 'new_relic', metric, ...(number !== undefined ? { value: number } : {}), unit, observedAt: validTime ? new Date(observedMs).toISOString() : receivedAt, receivedAt, freshnessMs, status, sourceEntityGuid: this.config.entityGuid, metadata })
-    }
-    if (system.status === 'fulfilled' && system.value[0]) { const row = system.value[0]; if (typeof row.hostname === 'string' && row.hostname) hostname = row.hostname; add('cpu_utilization', 'percent', row.cpu, row.observedAt); add('memory_utilization', 'percent', row.memory, row.observedAt) }
-    else { const failed = system.status === 'rejected' ? 'ERROR' : undefined; add('cpu_utilization', 'percent', undefined, undefined, {}, failed); add('memory_utilization', 'percent', undefined, undefined, {}, failed) }
-    const disks = storage.status === 'fulfilled' ? storage.value : []
-    const disk = disks.filter((row) => optionalPercent(row.utilization) !== undefined).sort((a, b) => Number(b.utilization) - Number(a.utilization))[0]
-    if (disk) { if (typeof disk.hostname === 'string' && disk.hostname) hostname = disk.hostname; add('storage_utilization', 'percent', disk.utilization, disk.observedAt, { mountPoint: disk.facet ?? disk.mountPoint, totalBytes: optionalFinite(disk.totalBytes), usedBytes: optionalFinite(disk.usedBytes) }) }
-    else add('storage_utilization', 'percent', undefined, undefined, {}, storage.status === 'rejected' ? 'ERROR' : undefined)
-    const networks = network.status === 'fulfilled' ? network.value : []
-    const newest = networks.reduce((max, row) => Math.max(max, Number(row.observedAt) || 0), 0)
-    const networkFailure = network.status === 'rejected' ? 'ERROR' : undefined
-    add('network_receive_bytes_per_second', 'bytes_per_second', sum(networks, 'received'), newest, { interfaces: networks.length }, networkFailure)
-    add('network_transmit_bytes_per_second', 'bytes_per_second', sum(networks, 'transmitted'), newest, { interfaces: networks.length }, networkFailure)
-    const storageObservation = observations.find((item) => item.metric === 'storage_utilization')!
-    const metricValues = Object.fromEntries(observations.flatMap((item) => item.value === undefined ? [] : [[metricField(item.metric), item.value]])) as Record<string, number>
-    if (disk && optionalFinite(disk.totalBytes) !== undefined) metricValues.storageTotalGb = Number(disk.totalBytes) / 1024 ** 3
-    if (disk && optionalFinite(disk.usedBytes) !== undefined) metricValues.storageUsedGb = Number(disk.usedBytes) / 1024 ** 3
-    const storageValue = storageObservation.value
-    const status = storageObservation.status === 'LIVE' ? storageValue! >= 90 ? 'critical' : storageValue! >= 75 ? 'warning' : 'online' : storageObservation.status === 'STALE' ? 'warning' : 'unknown'
-    return { resource: { id: resourceId, hostname, type: 'server', status, metrics: metricValues, alerts: [], lastUpdated: storageObservation.observedAt, receivedAt, sourceEntityId: this.config.entityGuid, telemetryStatus: storageObservation.status, freshnessSeconds: Math.floor(storageObservation.freshnessMs / 1000), source: 'newrelic' }, observations }
+    const systems = system.status === 'fulfilled' ? system.value : []; const disks = storage.status === 'fulfilled' ? storage.value : []; const networks = network.status === 'fulfilled' ? network.value : []
+    const hosts = new Set([...systems, ...disks, ...networks].map(hostname).filter((value): value is string => Boolean(value) && value!.startsWith(this.prefix)))
+    return [...hosts].sort().map((host) => this.normalizeHost(host, receivedAt, systems, disks, networks, { system: system.status, storage: storage.status, network: network.status }))
   }
+  async getSnapshot(resourceId: string, signal?: AbortSignal) { const snapshot = (await this.getFleetSnapshots(signal)).find((item) => item.resource.id === resourceId); if (!snapshot) throw new Error('Requested AVMOS resource is unavailable from New Relic.'); return snapshot }
   async getResource(resourceId: string, signal?: AbortSignal) { return (await this.getSnapshot(resourceId, signal)).resource }
   async getStorageTrend(): Promise<never> { throw new Error('Historical telemetry is read from DeepSpace.') }
-  async health(resourceId = this.config.resourceId, signal?: AbortSignal) { return (await this.getSnapshot(resourceId, signal)).resource.telemetryStatus === 'LIVE' }
-  private assertResource(resourceId: string) { if (resourceId !== this.config.resourceId) throw new Error('Resource is not mapped to the configured New Relic entity.') }
-  private async query(nrql: string, signal?: AbortSignal): Promise<Record<string, unknown>[]> {
-    const response = await fetch(ENDPOINTS[this.config.region], { method: 'POST', headers: { 'Content-Type': 'application/json', 'API-Key': this.config.userKey }, body: JSON.stringify({ query: `{ actor { account(id: ${this.config.accountId}) { nrql(query: ${JSON.stringify(nrql)}) { results } } } }` }), signal })
-    if (!response.ok) throw new Error(`New Relic request failed (${response.status}).`)
-    const body = await response.json() as { data?: { actor?: { account?: { nrql?: { results?: unknown } } } }; errors?: unknown[] }
-    if (body.errors?.length || !Array.isArray(body.data?.actor?.account?.nrql?.results)) throw new Error('New Relic returned an invalid NRQL response.')
-    return body.data.actor.account.nrql.results.filter(isObject)
+  async health(resourceId?: string, signal?: AbortSignal) { const snapshots = await this.getFleetSnapshots(signal); return resourceId ? snapshots.some((item) => item.resource.id === resourceId && item.resource.telemetryStatus === 'LIVE') : snapshots.some((item) => item.resource.telemetryStatus === 'LIVE') }
+  private normalizeHost(host: string, receivedAt: string, systems: Record<string, unknown>[], disks: Record<string, unknown>[], networks: Record<string, unknown>[], queryStatus: { system: string; storage: string; network: string }): TelemetrySnapshot {
+    const observations: TelemetryObservation[] = []; const system = systems.find((row) => hostname(row) === host); const hostDisks = disks.filter((row) => hostname(row) === host); const disk = hostDisks.filter((row) => optionalPercent(row.utilization) !== undefined).sort((a, b) => Number(b.utilization) - Number(a.utilization))[0]; const hostNetworks = networks.filter((row) => hostname(row) === host); const newestNetwork = hostNetworks.reduce((max, row) => Math.max(max, Number(row.observedAt) || 0), 0)
+    const add = (metric: TelemetryMetric, unit: TelemetryObservation['unit'], value: unknown, observed: unknown, metadata: Record<string, unknown> = {}, forced?: TelemetryStatus) => { const number = optionalFinite(value); const observedMs = Number(observed); const validTime = Number.isFinite(observedMs) && observedMs > 0 && observedMs <= Date.now() + 30_000; const freshnessMs = validTime ? Math.max(0, Date.now() - observedMs) : 0; const status: TelemetryStatus = forced ?? (number === undefined || !validTime ? 'UNAVAILABLE' : freshnessMs > 600_000 ? 'OFFLINE' : freshnessMs > 120_000 ? 'STALE' : 'LIVE'); observations.push({ resourceId: host, provider: 'new_relic', metric, ...(number !== undefined ? { value: number } : {}), unit, observedAt: validTime ? new Date(observedMs).toISOString() : receivedAt, receivedAt, freshnessMs, status, ...(this.config.entityGuid ? { sourceEntityGuid: this.config.entityGuid } : {}), metadata }) }
+    const systemFailure = queryStatus.system === 'rejected' ? 'ERROR' : undefined; add('cpu_utilization', 'percent', system?.cpu, system?.observedAt, {}, systemFailure); add('memory_utilization', 'percent', system?.memory, system?.observedAt, {}, systemFailure)
+    add('storage_utilization', 'percent', disk?.utilization, disk?.observedAt, { mountPoint: facetPart(disk, 1), totalBytes: optionalFinite(disk?.totalBytes), usedBytes: optionalFinite(disk?.usedBytes) }, queryStatus.storage === 'rejected' ? 'ERROR' : undefined)
+    const networkFailure = queryStatus.network === 'rejected' ? 'ERROR' : undefined; add('network_receive_bytes_per_second', 'bytes_per_second', sum(hostNetworks, 'received'), newestNetwork, { interfaces: hostNetworks.length }, networkFailure); add('network_transmit_bytes_per_second', 'bytes_per_second', sum(hostNetworks, 'transmitted'), newestNetwork, { interfaces: hostNetworks.length }, networkFailure)
+    const values = Object.fromEntries(observations.flatMap((item) => item.value === undefined ? [] : [[metricField(item.metric), item.value]])) as Record<string, number>; if (optionalFinite(disk?.totalBytes) !== undefined) values.storageTotalGb = Number(disk!.totalBytes) / 1024 ** 3; if (optionalFinite(disk?.usedBytes) !== undefined) values.storageUsedGb = Number(disk!.usedBytes) / 1024 ** 3
+    const statuses = observations.map((item) => item.status); const telemetryStatus: TelemetryStatus = statuses.includes('ERROR') ? 'ERROR' : statuses.every((item) => item === 'UNAVAILABLE' || item === 'OFFLINE') ? 'OFFLINE' : statuses.some((item) => item !== 'LIVE') ? 'STALE' : 'LIVE'; const percentages = [values.cpuUtilization, values.memoryUtilization, values.storageUtilization].filter((value): value is number => value !== undefined); const critical = (values.storageUtilization ?? 0) >= 90 || (values.cpuUtilization ?? 0) >= 95 || (values.memoryUtilization ?? 0) >= 95; const warning = (values.storageUtilization ?? 0) >= 75 || (values.cpuUtilization ?? 0) >= 80 || (values.memoryUtilization ?? 0) >= 80; const status = telemetryStatus === 'OFFLINE' ? 'offline' : telemetryStatus === 'ERROR' ? 'unknown' : critical ? 'critical' : warning || telemetryStatus === 'STALE' ? 'warning' : percentages.length ? 'online' : 'unknown'; const last = observations.filter((item) => item.value !== undefined).sort((a, b) => Date.parse(b.observedAt) - Date.parse(a.observedAt))[0]
+    return { resource: { id: host, hostname: host, type: 'server', status, metrics: values, alerts: [], lastUpdated: last?.observedAt ?? receivedAt, receivedAt, telemetryStatus, freshnessSeconds: Math.floor(Math.max(...observations.map((item) => item.freshnessMs), 0) / 1000), source: 'newrelic' }, observations }
   }
+  private async query(nrql: string, signal?: AbortSignal): Promise<Record<string, unknown>[]> { const response = await fetch(ENDPOINTS[this.config.region], { method: 'POST', headers: { 'Content-Type': 'application/json', 'API-Key': this.config.userKey }, body: JSON.stringify({ query: `{ actor { account(id: ${this.config.accountId}) { nrql(query: ${JSON.stringify(nrql)}) { results } } } }` }), signal }); if (!response.ok) throw new Error(`New Relic request failed (${response.status}).`); const body = await response.json() as { data?: { actor?: { account?: { nrql?: { results?: unknown } } } }; errors?: unknown[] }; if (body.errors?.length || !Array.isArray(body.data?.actor?.account?.nrql?.results)) throw new Error('New Relic returned an invalid NRQL response.'); return body.data.actor.account.nrql.results.filter(isObject) }
 }
+function hostname(row?: Record<string, unknown>) { const value = facetPart(row, 0) ?? row?.hostname; return typeof value === 'string' ? value : undefined }
+function facetPart(row: Record<string, unknown> | undefined, index: number) { const facet = row?.facet; return Array.isArray(facet) ? facet[index] : index === 0 ? facet : undefined }
 function metricField(metric: TelemetryMetric) { return ({ cpu_utilization: 'cpuUtilization', memory_utilization: 'memoryUtilization', storage_utilization: 'storageUtilization', network_receive_bytes_per_second: 'networkReceiveBytesPerSecond', network_transmit_bytes_per_second: 'networkTransmitBytesPerSecond' } as const)[metric] }
 function sum(rows: Record<string, unknown>[], field: string): number | undefined { const values = rows.map((row) => optionalFinite(row[field])).filter((value): value is number => value !== undefined); return values.length ? values.reduce((a, b) => a + b, 0) : undefined }
 function optionalFinite(value: unknown): number | undefined { if (value === null || value === undefined || value === '') return undefined; const number = Number(value); return Number.isFinite(number) && number >= 0 ? number : undefined }

@@ -1,13 +1,18 @@
 import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
+import { useConsoleRefresh } from './console-refresh'
 export type ResourceRow = { hostname:string; type:string; status:string; telemetryStatus:string; telemetrySource:string; metrics: Record<string,number>; lastObservedAt:string; freshnessSeconds?:number }
 export type CurrentMetric = { resourceId:string; metric:string; value?:number; unit:string; status:string; observedAt:string; freshnessMs:number }
 export type AlertRow = { resourceId:string; metric:string; severity:string; status:string; value:number; threshold:number; openedAt:string; updatedAt:string; resolvedAt?:string }
 export type AuditRow = { timestamp:string; actor:string; eventType:string; actionId:string; resourceId:string; policyVersion?:string; details:Record<string,unknown>; transactionHash?:string }
 export type AggregateRow = { resourceId:string; metric:string; bucketStart:string; minimum:number; maximum:number; average:number; sampleCount:number; status:string }
-export function ConsoleShell({ eyebrow, title, description, actions, children }:{ eyebrow:string; title:string; description:string; actions?:ReactNode; children:ReactNode }) { return <main className="console-page"><header className="console-heading"><div><p>{eyebrow}</p><h1>{title}</h1><span>{description}</span></div>{actions}</header>{children}</main> }
+export function ConsoleShell({ eyebrow, title, description, actions, children }:{ eyebrow:string; title:string; description:string; actions?:ReactNode; children:ReactNode }) { const refreshedAt=useConsoleRefresh(); return <main className="console-page" data-refreshed-at={refreshedAt}><header className="console-heading"><div><p>{eyebrow}</p><h1>{title}</h1><span>{description}</span></div>{actions}</header>{children}</main> }
 export function Panel({ title, detail, children, className='' }:{ title:string; detail?:string; children:ReactNode; className?:string }) { return <section className={`console-panel ${className}`}><header><h2>{title}</h2>{detail && <span>{detail}</span>}</header><div className="console-panel-body">{children}</div></section> }
-export function StatusPill({ status }:{ status:string }) { return <span className={`status-pill status-${status.toLowerCase()}`}>{status}</span> }
+export function MetricCard({label,value,detail}:{label:string;value:ReactNode;detail?:string}){return <article className="metric-card"><span>{label}</span><strong>{value}</strong>{detail&&<small>{detail}</small>}</article>}
+export function StatusPill({ status }:{ status:string }) {
+  const className = status.toLowerCase().replaceAll('_', '-').replaceAll(' ', '-')
+  return <span className={`status-pill status-${className}`}>{status}</span>
+}
 export function Empty({ children }:{children:ReactNode}) { return <div className="console-empty">{children}</div> }
 export function MetricValue({ metric }:{metric?:CurrentMetric}) { if (!metric || metric.value === undefined) return <span>—</span>; return <span>{metric.unit === 'percent' ? `${metric.value.toFixed(1)}%` : formatRate(metric.value)}</span> }
 export function metricMap(records:Array<{data:CurrentMetric}>, resourceId:string) { return Object.fromEntries(records.filter((r)=>r.data.resourceId===resourceId).map((r)=>[r.data.metric,r.data])) as Record<string,CurrentMetric> }

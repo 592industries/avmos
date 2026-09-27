@@ -55,6 +55,10 @@ export async function runTask(name: string, env: Env): Promise<void> {
   if (env.AUTONOMOUS_RUNS_ENABLED !== 'true') return
   const tools = createActionTools(env, env.OWNER_USER_ID, env.APP_OWNER_JWT)
   const slot = Math.floor(Date.now() / (15 * 60_000))
-  const result = await executeAgentCycle(tools, env, 'live', `cron-${env.NEW_RELIC_RESOURCE_ID ?? 'avmos'}-${slot}`)
+  const resources = await tools.query<{ telemetryStatus?: string }>('resources', { limit: 100 })
+  if (!resources.success) throw new Error(resources.error)
+  const target = resources.data.records.find((row) => row.data.telemetryStatus === 'LIVE' && /^avmos-node-\d{2}$/.test(row.recordId))
+  if (!target) return
+  const result = await executeAgentCycle(tools, env, target.recordId, `cron-${target.recordId}-${slot}`)
   if (!result.success) throw new Error(result.error)
 }

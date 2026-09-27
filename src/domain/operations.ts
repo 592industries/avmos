@@ -1,7 +1,7 @@
 import { z } from 'zod/v4'
 
 export const CURRENCY = 'RLUSD' as const
-export const telemetryStatuses = ['LIVE', 'STALE', 'UNAVAILABLE', 'ERROR', 'DEMO'] as const
+export const telemetryStatuses = ['LIVE', 'STALE', 'OFFLINE', 'UNAVAILABLE', 'ERROR', 'DEMO'] as const
 export type TelemetryStatus = (typeof telemetryStatuses)[number]
 export const telemetryMetrics = ['cpu_utilization', 'memory_utilization', 'storage_utilization', 'network_receive_bytes_per_second', 'network_transmit_bytes_per_second'] as const
 export type TelemetryMetric = (typeof telemetryMetrics)[number]
@@ -57,7 +57,7 @@ export const infrastructureResourceSchema = z.object({
   lastUpdated: z.string().datetime(),
   receivedAt: z.string().datetime().optional(),
   sourceEntityId: z.string().optional(),
-  telemetryStatus: z.enum(['LIVE', 'STALE', 'UNAVAILABLE', 'ERROR', 'DEMO']).optional(),
+  telemetryStatus: z.enum(['LIVE', 'STALE', 'OFFLINE', 'UNAVAILABLE', 'ERROR', 'DEMO']).optional(),
   freshnessSeconds: z.number().nonnegative().optional(),
   source: z.enum(['newrelic', 'demo']),
 })
@@ -145,6 +145,15 @@ export const auditEventTypes = [
   'ALERT_RESOLVED',
   'RECONCILIATION_REQUIRED',
   'BUDGET_RESERVED',
+  'POLICY_CREATED',
+  'POLICY_UPDATED',
+  'POLICY_ENABLED',
+  'POLICY_DISABLED',
+  'INTEGRATION_CONFIG_UPDATED',
+  'INTEGRATION_TEST_STARTED',
+  'INTEGRATION_VERIFIED',
+  'INTEGRATION_TEST_FAILED',
+  'INTEGRATION_CONFIG_CLEARED',
 ] as const
 
 export type AuditEventType = (typeof auditEventTypes)[number]

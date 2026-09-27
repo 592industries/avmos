@@ -3,12 +3,15 @@
 | Threat | Boundary | Mitigation and test |
 | --- | --- | --- |
 | Prompt injection in telemetry or web research | AI | Evidence stays in the user payload; the model has no execution tool. Malformed intent tests must reject. |
-| Compromised browser or stolen JWT | Worker | Verify JWT signature, issuer, expiry, app role, and owner for financial actions. Test every role and invalid token. |
+| Compromised browser or stolen JWT | Worker | Verify JWT signature, issuer, expiry, and canonical workspace role. Require administrator access for policy, integration, diagnostics, and evaluation routes. Test unauthenticated and non-admin access. |
 | Replayed request or duplicate cron cycle | Durable Object | Idempotency key, remediation fingerprint, and cooldown reservation. Test same key, different key, and concurrent runs. |
 | Budget race or policy change | Durable Object and policy | Reserve atomically against the selected policy's daily cap; store policy hash with action. Test concurrent reservations and policy updates. |
 | Stale or malicious telemetry | Telemetry adapter and policy | Validate value and timestamp, require live source and freshness before spend. Test absent, stale, malformed, and insufficient samples. |
 | Wrong network, destination, or asset | XRPL executor | Exact Testnet URL, protected destination mapping, classic address check, RLUSD check, and ledger field verification. Test deceptive URLs and mismatched destinations. |
 | Unknown payment state or audit write failure | Executor and audit | Preserve `UNKNOWN` reservation and transaction hash when known; never auto retry. Test submit timeout and audit failure after success. |
 | DeepSpace authorization bypass | Worker and RecordRoom | Explicit action allowlist, role checks before elevated tools, authenticated WebSockets, read-only assistant. Test unauthorized actions and subscriptions. |
+| Role spoofing through identity claims | Worker | Resolve roles from workspace membership and `OWNER_USER_ID`; never map provider names, email, or profile claims to privileges. Expose only safe identity diagnostics. |
+| Secret disclosure through integration UI | Worker and browser | Return configured booleans and public fields only. Keep credentials in environment bindings, redact failures, and never preload password inputs. |
+| Ambiguous policy selection | Policy resolver | Filter by resource, action, agent, provider, and vendor; deny zero or multiple matches before any provider call. |
 | Unbounded telemetry growth | RecordRoom and CronRoom | Expiry fields, hourly bounded deletion, retention status records, deterministic observation IDs, and configurable limits. Test backlog and repeated cleanup. |
 | Private data on public routes | Browser provider boundary | Public homepage mounts no RecordProvider; operational pages mount records only behind AuthGate. Test that `/` opens no records WebSocket. |

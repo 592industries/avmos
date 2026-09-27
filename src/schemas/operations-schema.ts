@@ -143,10 +143,23 @@ export const retentionStatusSchema: CollectionSchema = {
   ], permissions: readOnlyPermissions,
 }
 
+export const integrationConfigSchema: CollectionSchema = {
+  name: 'integration-config', columns: [
+    { name: 'providerId', storage: 'text', interpretation: 'plain', required: true },
+    { name: 'publicConfig', storage: 'text', interpretation: { kind: 'json' }, required: true },
+    { name: 'verificationStatus', storage: 'text', interpretation: 'plain', required: true },
+    { name: 'lastVerifiedAt', storage: 'text', interpretation: { kind: 'datetime' } },
+    { name: 'lastError', storage: 'text', interpretation: 'plain' },
+    { name: 'updatedAt', storage: 'text', interpretation: { kind: 'datetime' }, required: true },
+    { name: 'updatedBy', storage: 'text', interpretation: 'plain', required: true },
+  ], permissions: readOnlyPermissions,
+}
+
 export const policiesSchema: CollectionSchema = {
   name: 'policies',
   columns: [
     { name: 'id', storage: 'text', interpretation: 'plain', required: true },
+    { name: 'name', storage: 'text', interpretation: 'plain' },
     { name: 'version', storage: 'text', interpretation: 'plain', required: true },
     { name: 'enabled', storage: 'number', interpretation: { kind: 'boolean' }, required: true },
     {
@@ -171,11 +184,14 @@ export const policiesSchema: CollectionSchema = {
     { name: 'requireEvidence', storage: 'number', interpretation: { kind: 'boolean' }, required: true },
     { name: 'maxTelemetryAgeSeconds', storage: 'number', interpretation: 'plain' },
     { name: 'updatedAt', storage: 'text', interpretation: { kind: 'datetime' }, required: true },
+    { name: 'createdAt', storage: 'text', interpretation: { kind: 'datetime' } },
+    { name: 'createdBy', storage: 'text', interpretation: 'plain' },
+    { name: 'updatedBy', storage: 'text', interpretation: 'plain' },
   ],
   permissions: {
     viewer: { read: true, create: false, update: false, delete: false },
     member: { read: true, create: false, update: false, delete: false },
-    admin: { read: true, create: true, update: true, delete: false },
+    admin: { read: true, create: false, update: false, delete: false },
   },
 }
 

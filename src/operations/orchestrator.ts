@@ -11,6 +11,7 @@ import {
 } from '../domain/operations'
 import { evaluatePolicy } from '../policy/engine'
 import type { TelemetrySource } from '../telemetry/newrelic'
+import { safeMessage } from '../telemetry/retention'
 import { DefinitivePaymentError, SubmissionUnknownError, type PaymentExecutor } from '../xrpl/executor'
 import { operationRequestHash, type ReserveRequest, type ReserveResult } from './guard'
 
@@ -125,7 +126,9 @@ export class OperationsOrchestrator {
       agentId: proposal.intent.agentId,
       resourceId: resource.id,
       actionIntent: proposal.intent,
-      reasoning: proposal.reasoning,
+      // The model explanation is reduced to a bounded summary above. Raw model
+      // reasoning is never persisted or sent to the console.
+      reasoning: '',
       decisionSummary,
       policyDecision: decision,
       executionStatus: decision.decision === 'DENIED' ? 'POLICY_DENIED' : 'POLICY_APPROVED',
@@ -206,7 +209,7 @@ export class OperationsOrchestrator {
         currency: payment.currency,
         timestamp: new Date().toISOString(),
         ...(error instanceof SubmissionUnknownError ? { transactionHash: error.transactionHash } : {}),
-        error: error instanceof Error ? error.message : String(error),
+        error: safeMessage(error),
       }
     }
     action.execution = execution

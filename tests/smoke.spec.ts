@@ -4,10 +4,15 @@ import { captureConsoleErrors } from './helpers/errors'
 test.describe('AVMOS routing and signed-out shell', () => {
   test('root loads the public AVMOS product page without console errors', async ({ page }) => {
     const errors = captureConsoleErrors(page)
+    const sockets:string[]=[]; const requests:string[]=[]
+    page.on('websocket', socket=>sockets.push(socket.url()))
+    page.on('request', request=>requests.push(request.url()))
     await page.goto('/')
     await expect(page.getByTestId('app-navigation')).toBeVisible({ timeout: 15_000 })
     await expect(page.getByRole('heading', { name: /Autonomous operations for critical infrastructure/i })).toBeVisible()
-    await expect(page.getByText('Detection is only the beginning.')).toBeVisible()
+    await expect(page.getByText('Monitoring detects the problem.')).toBeVisible()
+    expect(sockets.filter(url=>new URL(url).pathname.startsWith('/ws/'))).toEqual([])
+    expect(requests.some(url=>url.includes('newrelic.com'))).toBe(false)
     expect(errors).toEqual([])
   })
 

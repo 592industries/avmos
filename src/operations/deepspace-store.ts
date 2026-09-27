@@ -95,7 +95,7 @@ export class DeepSpaceOperationsStore implements OperationsStore {
     }
   }
 
-  async recordTelemetryFailure(resourceId: string, status: 'UNAVAILABLE' | 'ERROR'): Promise<void> {
+  async recordTelemetryFailure(resourceId: string, status: 'UNAVAILABLE' | 'OFFLINE' | 'ERROR'): Promise<void> {
     const previous = await this.tools.get('resources', resourceId)
     const data = previous.success
       ? (previous.data as { record?: { data?: Record<string, unknown> } }).record?.data
@@ -104,7 +104,7 @@ export class DeepSpaceOperationsStore implements OperationsStore {
     await expectSuccess(this.tools.create('resources', {
       hostname: resourceId,
       type: 'server',
-      status: 'unknown',
+      status: status === 'OFFLINE' ? 'offline' : 'unknown',
       telemetryStatus: status,
       telemetrySource: 'newrelic',
       historicalStatus: 'UNAVAILABLE',

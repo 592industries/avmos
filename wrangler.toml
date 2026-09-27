@@ -29,6 +29,7 @@ run_worker_first = ["/api/*", "/ws/*", "/internal/*", "/v1/*", "/_deepspace/*", 
 [vars]
 DEEPSPACE_APP_ID = "app_01M3FSEF0RC4H3BFSYABBGAGRP"
 APP_NAME = "AVMOS"
+NEW_RELIC_FLEET_PREFIX = "avmos-node-"
 TELEMETRY_RAW_RETENTION_DAYS = "7"
 TELEMETRY_AGGREGATE_RETENTION_DAYS = "30"
 OPERATIONS_LOG_RETENTION_DAYS = "7"
@@ -74,7 +75,8 @@ bindings = [
 
 # --- DeepSpace detected secrets (names only; values live in `npx deepspace secrets`) ---
 #   GROK_API_KEY, GROK_MODEL, GROK_BASE_URL
-#   NEW_RELIC_USER_KEY, NEW_RELIC_ACCOUNT_ID, NEW_RELIC_ENTITY_GUID
+#   NEW_RELIC_USER_KEY, NEW_RELIC_ACCOUNT_ID
+# Optional New Relic legacy metadata: NEW_RELIC_ENTITY_GUID
 #   NEW_RELIC_REGION, NEW_RELIC_RESOURCE_ID, ACTIVE_POLICY_ID
 #   TAVILY_API_KEY
 #   XRPL_EXECUTION_MODE, XRPL_TESTNET_URL, XRPL_WALLET_SECRET

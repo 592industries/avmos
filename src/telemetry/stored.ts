@@ -22,5 +22,5 @@ export class StoredTelemetrySource implements TelemetrySource {
     if (points.length < 2) throw new Error('Stored telemetry has insufficient trend samples.')
     return telemetryTrendSchema.parse({ resourceId, metric: 'storage_utilization', points, source: 'newrelic' })
   }
-  async health(resourceId = 'avmos') { try { return (await this.getResource(resourceId)).telemetryStatus === 'LIVE' } catch { return false } }
+  async health(resourceId = 'avmos-node-01') { try { return (await this.getResource(resourceId)).telemetryStatus === 'LIVE' } catch { return false } }
 }

@@ -1,16 +1,15 @@
 import type { ActionHandler, ActionTools } from 'deepspace/worker'
 import { isValidClassicAddress } from 'xrpl'
 import type { Env } from '../../worker'
-import { AgentRuntime, DemoAgentModel } from '../agent/runtime'
+import { AgentRuntime } from '../agent/runtime'
 import { GrokAgentModel } from '../agent/grok'
-import { defaultPolicy, policySchema, type Policy } from '../domain/operations'
+import { policySchema, type Policy, type PolicyDecision } from '../domain/operations'
 import { DeepSpaceOperationsStore } from '../operations/deepspace-store'
 import { operationRequestHash } from '../operations/guard'
 import { OperationsOrchestrator } from '../operations/orchestrator'
 import { OptionalResearchProvider, TavilyResearchProvider } from '../research/tavily'
-import { DemoTelemetryAdapter } from '../telemetry/demo'
-import { NewRelicTelemetryAdapter } from '../telemetry/newrelic'
 import { StoredTelemetrySource } from '../telemetry/stored'
+import { safeMessage } from '../telemetry/retention'
 import {
   SimulatedPaymentExecutor,
   TrustLineManager,
@@ -20,18 +19,14 @@ import {
   TransactionVerifier,
 } from '../xrpl/executor'
 
-type CycleMode = 'live' | 'demo-approved' | 'demo-denied'
-
 const runAgentCycle: ActionHandler<Env> = async ({ userId, params, tools, env }) => {
-  if (userId !== env.OWNER_USER_ID) return { success: false, error: 'Forbidden: owner only' }
-  const mode: CycleMode = params.mode === 'demo-denied' ? 'demo-denied' : params.mode === 'demo-approved' ? 'demo-approved' : 'live'
-  if (mode !== 'live' && env.DEMO_MODE !== 'true') return { success: false, error: 'Demo mode is disabled.' }
-  return executeAgentCycle(tools, env, mode, String(params.idempotencyKey ?? crypto.randomUUID()), params.research === true)
+  const resourceId = String(params.resourceId ?? '')
+  return executeAgentCycle(tools, env, resourceId, String(params.idempotencyKey ?? crypto.randomUUID()), params.research === true, userId)
 }
 
-export async function executeAgentCycle(tools: ActionTools, env: Env, mode: CycleMode, idempotencyKey: string = crypto.randomUUID(), research = false) {
-  const resourceId = env.NEW_RELIC_RESOURCE_ID ?? 'avmos'
-  const requestTag = `${mode}:${research ? 'research' : 'no-research'}`
+export async function executeAgentCycle(tools: ActionTools, env: Env, resourceId: string, idempotencyKey: string = crypto.randomUUID(), research = false, actor = 'scheduled-agent') {
+  if (!/^avmos-node-\d{2}$/.test(resourceId)) return { success: false as const, error: 'Requested resource ID is invalid.' }
+  const requestTag = `live:${research ? 'research' : 'no-research'}`
   const namespace = env.RECORD_ROOMS
   const stub = namespace.get(namespace.idFromName(`app:${env.DEEPSPACE_APP_ID}`))
   const lookup = await stub.fetch(new Request('https://internal/internal/avmos/lookup', {
@@ -46,22 +41,19 @@ export async function executeAgentCycle(tools: ActionTools, env: Env, mode: Cycl
     if (!action) return { success: false as const, error: 'Original operation is still in progress.' }
     return { success: true as const, data: { actionId: action.id, decision: action.policyDecision.decision, executionStatus: action.executionStatus, transactionHash: action.execution?.transactionHash, simulation: action.execution?.mode === 'SIMULATED' } }
   }
-  const demo = mode !== 'live'
-  if (demo && env.DEMO_MODE !== 'true') return { success: false as const, error: 'Demo mode is disabled.' }
-  if (!env.XRPL_VENDOR_DESTINATION || !isValidClassicAddress(env.XRPL_VENDOR_DESTINATION)) return { success: false as const, error: 'XRPL vendor destination is not configured with a valid classic address.' }
-  if (!demo && (!env.NEW_RELIC_USER_KEY || !env.NEW_RELIC_ACCOUNT_ID || !env.NEW_RELIC_ENTITY_GUID || !env.GROK_API_KEY)) {
-    return { success: false as const, error: 'Live New Relic and Grok configuration is incomplete.' }
-  }
-  if (env.XRPL_EXECUTION_MODE === 'live' && demo) return { success: false as const, error: 'Demo evidence cannot authorize live settlement.' }
-  if (env.XRPL_EXECUTION_MODE && !['live', 'simulated'].includes(env.XRPL_EXECUTION_MODE)) return { success: false as const, error: 'XRPL execution mode is invalid.' }
-  if (env.XRPL_EXECUTION_MODE === 'live' && (!env.XRPL_WALLET_SECRET || !env.XRPL_RLUSD_ISSUER || !env.XRPL_RLUSD_CURRENCY || !env.XRPL_TESTNET_URL)) {
-    return { success: false as const, error: 'Live XRPL execution configuration is incomplete.' }
-  }
   try {
-  const policy = await resolvePolicy(tools, env, demo)
+  const telemetry = new StoredTelemetrySource(tools)
+  const resource = await telemetry.getResource(resourceId)
+  if (resource.telemetryStatus !== 'LIVE') return { success: true as const, data: await recordResolutionDenial(tools, env, resourceId, actor, 'RESOURCE_TELEMETRY_STALE') }
+  const resolution = await resolvePolicy(tools, env, resourceId)
+  if (!resolution.policy) return { success: true as const, data: await recordResolutionDenial(tools, env, resourceId, actor, resolution.reason) }
+  const policy = resolution.policy
+  if (!env.XRPL_VENDOR_DESTINATION || !isValidClassicAddress(env.XRPL_VENDOR_DESTINATION)) return { success: false as const, error: 'XRPL vendor destination is not configured with a valid classic address.' }
+  if (!env.GROK_API_KEY) return { success: false as const, error: 'Grok configuration is incomplete.' }
+  if (env.XRPL_EXECUTION_MODE && !['live', 'simulated'].includes(env.XRPL_EXECUTION_MODE)) return { success: false as const, error: 'XRPL execution mode is invalid.' }
+  if (env.XRPL_EXECUTION_MODE === 'live' && (!env.XRPL_WALLET_SECRET || !env.XRPL_RLUSD_ISSUER || !env.XRPL_RLUSD_CURRENCY || !env.XRPL_TESTNET_URL)) return { success: false as const, error: 'Live XRPL execution configuration is incomplete.' }
   const destinations = { 'approved-storage-vendor': env.XRPL_VENDOR_DESTINATION }
-  const telemetry = demo ? new DemoTelemetryAdapter() : new StoredTelemetrySource(tools)
-  const model = demo ? new DemoAgentModel(mode === 'demo-denied') : new GrokAgentModel({
+  const model = new GrokAgentModel({
     apiKey: env.GROK_API_KEY!, model: env.GROK_MODEL, baseUrl: env.GROK_BASE_URL,
   })
   const research = new OptionalResearchProvider(
@@ -85,7 +77,7 @@ export async function executeAgentCycle(tools: ActionTools, env: Env, mode: Cycl
     executor,
     new DeepSpaceOperationsStore(tools, env),
     destinations,
-    demo,
+    false,
   )
     const result = await orchestrator.run(resourceId, idempotencyKey, AbortSignal.timeout(60_000), requestTag, research ? 'current storage capacity remediation options and vendor documentation for a cloud server' : undefined)
     return {
@@ -94,6 +86,7 @@ export async function executeAgentCycle(tools: ActionTools, env: Env, mode: Cycl
         actionId: result.action.id,
         decision: result.action.policyDecision.decision,
         executionStatus: result.action.executionStatus,
+        reason: result.action.policyDecision.reason,
         transactionHash: result.action.execution?.transactionHash,
         simulation: executor instanceof SimulatedPaymentExecutor,
       },
@@ -101,7 +94,7 @@ export async function executeAgentCycle(tools: ActionTools, env: Env, mode: Cycl
   } catch (error) {
     return {
       success: false as const,
-      error: error instanceof Error ? error.message : String(error),
+      error: safeMessage(error),
     }
   }
 }
@@ -155,7 +148,7 @@ const setupXrplTrustLine: ActionHandler<Env> = async ({ userId, env }) => {
       data: { address: wallet.address, transactionHash, balance, network: 'XRPL Testnet' },
     }
   } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : String(error) }
+    return { success: false, error: safeMessage(error) }
   }
 }
 
@@ -165,8 +158,8 @@ const reconcileXrplOperation: ActionHandler<Env> = async ({ userId, params, tool
   const store = new DeepSpaceOperationsStore(tools, env)
   const operationId = String(params.operationId)
   const action = await store.getAction(operationId)
-  if (!action || action.executionStatus !== 'UNKNOWN' || !action.execution?.transactionHash) {
-    return { success: false, error: 'An UNKNOWN operation with a transaction hash is required.' }
+  if (!action || action.executionStatus !== 'RECONCILIATION_REQUIRED' || !action.execution?.transactionHash) {
+    return { success: false, error: 'A reconciliation-required operation with a transaction hash is required.' }
   }
   const intent = action.actionIntent
   const expected = {
@@ -214,23 +207,32 @@ export const actions: Record<string, ActionHandler<Env>> = {
   reconcileXrplOperation,
 }
 
-async function resolvePolicy(tools: ActionTools, env: Env, demo: boolean): Promise<Policy> {
-  // Demo outcomes are fixed and never inherit a production policy's limits.
-  if (demo) return defaultPolicy()
-  const result = await tools.query('policies', { limit: 10 })
+export type PolicyResolution = { policy: Policy; reason: 'SELECTED' } | { policy: null; reason: 'NO_APPLICABLE_POLICY' | 'AMBIGUOUS_POLICY' }
+export async function resolvePolicy(tools: ActionTools, env: Env, resourceId: string): Promise<PolicyResolution> {
+  const result = await tools.query('policies', { limit: 500 })
   if (!result.success) throw new Error(result.error)
   const records = (result.data as { records?: Array<{ data?: unknown }> }).records ?? []
   const active = records.flatMap((record) => {
     const parsed = policySchema.safeParse(record.data)
     return parsed.success && parsed.data.enabled ? [parsed.data] : []
   })
+  const applicable = active.filter((policy) => policy.allowedResources.includes(resourceId) && policy.allowedActions.includes('purchase_storage') && policy.allowedAgents.includes('infrastructure-agent') && policy.allowedProviders.includes('xrpl-testnet') && policy.allowedVendors.includes('approved-storage-vendor'))
   if (env.ACTIVE_POLICY_ID) {
-    const selected = active.find((policy) => policy.id === env.ACTIVE_POLICY_ID)
-    if (!selected) throw new Error('Selected authorization policy is unavailable.')
-    return selected
+    const selected = applicable.find((policy) => policy.id === env.ACTIVE_POLICY_ID)
+    return selected ? { policy: selected, reason: 'SELECTED' } : { policy: null, reason: 'NO_APPLICABLE_POLICY' }
   }
-  if (active.length === 1) return active[0]
-  throw new Error('Exactly one active authorization policy is required.')
+  if (applicable.length === 1) return { policy: applicable[0], reason: 'SELECTED' }
+  return applicable.length === 0 ? { policy: null, reason: 'NO_APPLICABLE_POLICY' } : { policy: null, reason: 'AMBIGUOUS_POLICY' }
+}
+
+async function recordResolutionDenial(tools: ActionTools, env: Env, resourceId: string, actor: string, reason: 'NO_APPLICABLE_POLICY' | 'AMBIGUOUS_POLICY' | 'RESOURCE_TELEMETRY_STALE') {
+  const now = new Date().toISOString(); const id = `action-${crypto.randomUUID()}`
+  const decision: PolicyDecision = { decision: 'DENIED', policyVersion: 'UNRESOLVED', reason, checks: [{ name: 'policy_resolution', passed: false, detail: reason }], timestamp: now, dailyRemaining: 0 }
+  const store = new DeepSpaceOperationsStore(tools, env)
+  const action = { id, agentId: 'infrastructure-agent', resourceId, actionIntent: { resourceId, actionType: 'purchase_storage' }, reasoning: '', decisionSummary: `Evaluation stopped: ${reason}.`, policyDecision: decision, executionStatus: 'POLICY_DENIED' as const, auditStatus: 'COMPLETE' as const, createdAt: now }
+  await store.recordPolicyDecision(action); await store.recordAction(action)
+  await store.appendAudit({ id: `audit-${crypto.randomUUID()}`, timestamp: now, actor, eventType: 'POLICY_DENIED', actionId: id, resourceId, details: { reason } })
+  return { actionId: id, decision: 'DENIED', executionStatus: 'POLICY_DENIED', reason, simulation: env.XRPL_EXECUTION_MODE !== 'live' }
 }
 
 function extractData(value: unknown): unknown[] {

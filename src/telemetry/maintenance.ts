@@ -6,10 +6,18 @@ type Envelope<T> = { recordId: string; data: T }
 export async function aggregateTelemetry(tools: ActionTools, env: Env, now = new Date()) {
   const completed = new Date(now); completed.setUTCMinutes(0, 0, 0); completed.setUTCHours(completed.getUTCHours() - 1)
   const bucket = completed.toISOString()
-  const result = await tools.query<{ resourceId: string; metric: string; unit: string; value?: number; status: string }>('telemetry-observations', { where: { hourBucket: bucket }, limit: 500 })
-  if (!result.success) throw new Error(result.error)
   const groups = new Map<string, Array<Envelope<{ resourceId: string; metric: string; unit: string; value?: number; status: string }>>>()
-  for (const row of result.data.records) { if (row.data.value === undefined || row.data.status !== 'LIVE') continue; const key = `${row.data.resourceId}|${row.data.metric}`; groups.set(key, [...(groups.get(key) ?? []), row]) }
+  const resources = await tools.query('resources', { limit: 500 })
+  if (!resources.success) throw new Error(resources.error)
+  const metrics = ['cpu_utilization', 'memory_utilization', 'storage_utilization', 'network_receive_bytes_per_second', 'network_transmit_bytes_per_second']
+  for (const resource of resources.data.records.filter((row) => /^avmos-node-\d{2}$/.test(row.recordId))) {
+    for (const metric of metrics) {
+      const result = await tools.query<{ resourceId: string; metric: string; unit: string; value?: number; status: string }>('telemetry-observations', { where: { hourBucket: bucket, resourceId: resource.recordId, metric }, limit: 500 })
+      if (!result.success) throw new Error(result.error)
+      const live = result.data.records.filter((row) => row.data.value !== undefined && row.data.status === 'LIVE')
+      if (live.length) groups.set(`${resource.recordId}|${metric}`, live)
+    }
+  }
   for (const rows of groups.values()) { const first = rows[0].data; const values = rows.map((row) => row.data.value!); const end = new Date(completed.getTime() + 3_600_000); await tools.create('telemetry-aggregates', { resourceId: first.resourceId, metric: first.metric, unit: first.unit, bucketStart: bucket, bucketEnd: end.toISOString(), minimum: Math.min(...values), maximum: Math.max(...values), average: values.reduce((a, b) => a + b, 0) / values.length, sampleCount: values.length, status: 'LIVE', ...expiry(retentionDays(env).aggregates, end) }, `aggregate:${first.resourceId}:${first.metric}:${bucket}`) }
   await logOperation(tools, env, 'aggregate-telemetry', 'SUCCESS', `Aggregated ${groups.size} metric groups for ${bucket}.`)
 }
@@ -17,12 +25,13 @@ export async function aggregateTelemetry(tools: ActionTools, env: Env, now = new
 const RETAINED = ['telemetry-observations', 'telemetry-aggregates', 'operations-log', 'actions', 'policy-decisions', 'alerts', 'audit-events'] as const
 export async function cleanupRetention(tools: ActionTools, env: Env, now = new Date()) {
   const configured = Math.min(500, Math.max(1, Number(env.RETENTION_DELETE_BATCH_SIZE) || 500))
+  const deadline = Date.now() + 20_000
   for (const collection of RETAINED) {
     let deleted = 0; let status = 'CURRENT'; let error: string | undefined
     const previous = await tools.get<{ cursorDate?: string }>('retention-status', collection)
     let cursorDate = previous.success && previous.data.record?.data.cursorDate ? previous.data.record.data.cursorDate : await oldestExpiryDate(tools, collection)
     try {
-      for (let page = 0; page < 4; page += 1) {
+      for (let page = 0; page < 12 && Date.now() < deadline; page += 1) {
         if (!cursorDate || cursorDate > now.toISOString().slice(0, 10)) break
         const removal = await tools.deleteWhere(collection, { expiresOn: cursorDate }, configured)
         if (!removal.success) throw new Error(removal.error)

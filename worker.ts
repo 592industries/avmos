@@ -25,6 +25,7 @@ import { tasks as cronTasks, runTask as runCronTask } from './src/cron.js'
 import { runJob } from './src/jobs.js'
 import { schemas } from './src/schemas.js'
 import { registerActionRoutes } from './src/server/action-routes.js'
+import { registerAdminRoutes } from './src/server/admin-routes.js'
 import {
   registerAuthAndIntegrationRoutes,
   registerPlatformProxyRoutes,
@@ -162,6 +163,7 @@ export interface Env extends DOBindings<typeof __DO_MANIFEST__> {
   NEW_RELIC_ENTITY_GUID?: string
   NEW_RELIC_REGION?: string
   NEW_RELIC_RESOURCE_ID?: string
+  NEW_RELIC_FLEET_PREFIX?: string
   DEMO_MODE?: string
   ACTIVE_POLICY_ID?: string
   TAVILY_API_KEY?: string
@@ -227,6 +229,7 @@ app.use('*', async (c, next) => {
 
 // Registration order is part of the worker contract. The wildcard auth route
 // follows its special cases, AI precedes platform proxies, and static is last.
+registerAdminRoutes(app, resolveAuth)
 registerAuthAndIntegrationRoutes(app)
 registerRealtimeRoutes(app)
 registerActionRoutes(app, resolveAuth)
