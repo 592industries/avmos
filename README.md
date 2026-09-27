@@ -1,93 +1,43 @@
-# Agent-Monitor
+# AVMOS
 
-Agent-Monitor is a DeepSpace-native infrastructure operations prototype. It turns normalized infrastructure telemetry into a schema-validated economic action, evaluates that action with deterministic policy code, and sends approved payments through a protected XRPL Testnet executor.
+**Autonomous Verification, Monitoring & Operations System**
 
-The core invariant is enforced by module boundaries:
+AVMOS observes infrastructure, asks Grok to propose a response, applies deterministic policy, and records the result in DeepSpace. The model never authorizes, signs, or submits a financial transaction.
+
+## Problem and architecture
+
+Repeated infrastructure alerts can prompt duplicate or unsafe remediation payments. AVMOS uses New Relic as evidence, a policy engine as authority, a serialized DeepSpace Durable Object reservation as a budget and remediation guard, and a protected XRPL Testnet executor as the only signer.
 
 ```text
-LibreNMS + Timescale bridge
-          ↓
-      AgentRuntime ── Grok / demo model
-          ↓
-    validated ActionIntent
-          ↓
- deterministic policy engine
-      ↙ DENIED    ↘ APPROVED
-  audit only       ApprovedPaymentRequest
-                          ↓
-                 protected XRPL executor
-                          ↓
-                  DeepSpace audit state
+New Relic StorageSample → normalized resource + historical trend → Grok proposal
+  → validated intent → deterministic policy → atomic budget reservation
+  → XRPL Testnet executor (or explicit simulation) → verification → DeepSpace audit
 ```
 
-The model never receives the wallet seed, policy configuration, or signing function. `OperationsOrchestrator` is the only component that converts an approved decision into `ApprovedPaymentRequest`; denied decisions return before the executor call.
+The DeepSpace Worker provides authenticated actions, role checks, RecordRoom state, realtime subscriptions, CronRoom scheduling, and deployment. Both manual runs and scheduled runs call the same operation service. Tavily is optional research and has no authorization role.
 
-## DeepSpace responsibilities
+## Security and execution
 
-- RecordRoom collections store agents, resources, policies, actions, and audit events.
-- Server actions run owner-gated operational cycles and answer Photon-style questions.
-- Record subscriptions update the dashboard in realtime.
-- CronRoom can run the observation cycle every 15 minutes, but only when `AUTONOMOUS_RUNS_ENABLED=true`.
-- Authentication, RBAC, state, realtime, jobs, secrets, API routing, and deployment remain in the existing DeepSpace scaffold.
+- Live runs require a New Relic user key, account, entity GUID, and a Grok key. Missing or stale evidence cannot authorize live spending. Demo fixtures are used only when `DEMO_MODE=true` and a demo action is explicitly selected.
+- Actions require verified bearer JWTs and application roles. Financial actions require the app owner and a UUID `Idempotency-Key`. The operator assistant has read-only tools.
+- An operation reservation serializes budget checks and blocks repeat remediation on the same resource, action, and vendor. Successful operations retain a 24-hour cooldown. An unknown XRPL outcome keeps its reservation until reconciliation.
+- The executor accepts an approved payment request, checks the configured vendor destination, and connects only to `wss://s.altnet.rippletest.net:51233`. It verifies the ledger result separately. `XRPL_EXECUTION_MODE=simulated` is the safe default.
+- DeepSpace audit events and action records record the policy decision and settlement state. A ledger outcome and audit persistence have separate statuses; audit failure must never trigger an automatic payment retry.
 
-No parallel backend or general-purpose database was added. TimescaleDB is accessed only through a narrow read-only HTTPS telemetry bridge.
+## Local development
 
-## Development
+Use Node 24 and npm 11.6 or newer. Install with `npm ci`, authenticate with `npx deepspace auth login`, then run `npm run dev`. The immutable `DEEPSPACE_APP_ID` already exists in `wrangler.toml`; do not replace it. The GitHub `origin` remote is the source repository; this project does not use `deepspace push`.
 
-Use a supported Node version and authenticate before the first DeepSpace command:
+Configure the names in [`.env.example`](./.env.example) through `npx deepspace secrets set KEY=value`. DeepSpace owns platform identity, JWT, owner, and app bindings. Never commit wallet seeds, user keys, JWTs, or `.dev.vars`.
 
-```sh
-npx deepspace auth login
-npx deepspace app init
-npm run validate
-npm run build
-npm run dev
-```
+For a live operation, configure New Relic and Grok, ensure exactly one enabled authorization policy exists (or set `ACTIVE_POLICY_ID` to select an enabled policy), and set a valid Testnet vendor destination. Settle in simulated mode first. Enable XRPL live mode only after checking the account, RLUSD issuer and trust line, destination, policy, and reconciliation process. `AUTONOMOUS_RUNS_ENABLED=false`, `DEMO_MODE=false`, and `ALLOW_DEBUG_ROUTES=false` are the production defaults.
 
-The first two commands replace the scaffold's `__APP_ID__` with the server-minted immutable app ID. Never hand-write that ID.
+## Verification and demo
 
-## Secrets and modes
+Run `npm run lint`, `npm run type-check`, `npm run test:unit`, `npm test`, and `npm run build`. `npm test` uses the DeepSpace test runner and needs a valid DeepSpace session. CI runs validation before deploying pushes to `main`.
 
-`.env.example` documents names only. Configure values in the encrypted store:
+The approved path observes live New Relic storage telemetry, computes a historical trend, validates Grok's proposal, reserves budget, and simulates or submits settlement. The rejection control is explicitly labeled as a demo and requires `DEMO_MODE=true`; its malicious proposal must be denied before the executor is called. The audit timeline reflects records as they arrive through DeepSpace realtime.
 
-```sh
-npx deepspace secrets set GROK_API_KEY=...
-npx deepspace secrets set LIBRENMS_URL=... LIBRENMS_API_KEY=...
-npx deepspace secrets set TIMESCALEDB_URL=... TIMESCALEDB_BRIDGE_TOKEN=...
-```
+## Limits
 
-Do not edit `.dev.vars`; DeepSpace regenerates it.
-
-The dashboard works without external credentials using explicit demo adapters and a simulated settlement executor. Live settlement requires every XRPL setting plus `XRPL_EXECUTION_MODE=live`. The XRPL client rejects endpoints that do not identify themselves as Testnet or Devnet.
-
-## XRPL Testnet setup
-
-Use a disposable funded Testnet account only:
-
-1. Store its seed as `XRPL_WALLET_SECRET`.
-2. Set the Testnet WebSocket URL, RLUSD issuer/currency, and approved vendor destination.
-3. Use `TrustLineManager.establish()` once to create the RLUSD trust line.
-4. Verify funding with `TrustLineManager.balance()`.
-5. Keep `XRPL_EXECUTION_MODE=simulated` until the trust line and destination are verified.
-6. Set the mode to `live`, redeploy, then run the approved scenario.
-
-`TransactionVerifier` independently checks that the submitted transaction is validated with `tesSUCCESS`.
-
-## Demonstrations
-
-- **Approved scenario:** `server1` trends from 82% to 91%; the model proposes 129 RLUSD to the allowlisted storage vendor; policy approves; settlement runs; the hash and complete audit chain are recorded.
-- **Denial scenario:** the model proposes 4,700 RLUSD to an unknown vendor; deterministic policy denies it; the XRPL executor is never called; the denial is audited.
-
-The action buttons are owner-only. Photon-style questions use `askPhoton`, which reads the same resource, action, and audit collections as the dashboard and contains no authorization or execution logic.
-
-## Verification
-
-```sh
-npm run lint
-npm run type-check
-npm run test:unit
-npm run test
-npm run build
-```
-
-Unit tests cover schema failure, policy rules, denied-executor isolation, success hashes, and execution failure audits. Playwright continues to cover the DeepSpace runtime.
+The exact `StorageSample` attribute set and entity mapping must be checked against the connected New Relic account. No live integration has been verified without operator credentials. Reconciliation of an `UNKNOWN` XRPL submission is manual; automatic retry is intentionally disabled. The current UI displays one configured infrastructure entity. See [architecture](./docs/architecture.md) and [threat model](./docs/threat-model.md).

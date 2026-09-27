@@ -1,0 +1,18 @@
+.avmos-landing { min-height: 100vh; background: #080c11; color: #f2f6f8; font-family: Inter, 'Segoe UI', Arial, sans-serif; }
+.avmos-landing-shell { min-height: 100vh; max-width: 1600px; margin: auto; padding: 26px 50px 32px; display: flex; flex-direction: column; }
+.avmos-landing header, .avmos-landing footer { display: flex; justify-content: space-between; gap: 20px; font: 10px Consolas, monospace; letter-spacing: .14em; }
+.avmos-landing header { border-top: 2px solid #f2f6f8; padding-top: 12px; color: #91a5b2; }
+.avmos-landing footer { border-top: 1px solid #2a3945; padding-top: 17px; color: #91a5b2; }
+.avmos-landing-content { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 70px 0 95px; }
+.avmos-landing-content > p { color: #6fbcf6; font: 12px Consolas, monospace; letter-spacing: .17em; }
+.avmos-landing h1 { font-size: clamp(100px, 17vw, 280px); line-height: .9; margin: 20px 0 70px; letter-spacing: -.105em; font-weight: 800; }
+.avmos-landing h1 span { color: #6fbcf6; font-weight: 300; margin-left: .05em; }
+.avmos-landing-intro { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; }
+.avmos-landing-rule { border-top: 1px solid #2a3945; margin-top: 12px; }
+.avmos-landing-intro h2 { font-size: clamp(24px, 3vw, 45px); letter-spacing: -.05em; }
+.avmos-landing-intro p { max-width: 520px; color: #91a5b2; font-size: 15px; line-height: 1.6; margin: 18px 0 30px; }
+.avmos-landing-intro a { display: inline-flex; gap: 25px; align-items: center; border: 1px solid #6fbcf6; color: #f2f6f8; padding: 15px 18px; font: 11px Consolas, monospace; letter-spacing: .09em; transition: background .18s ease, box-shadow .18s ease; }
+.avmos-landing-intro a:hover { background: rgba(111,188,246,.1); box-shadow: 0 0 20px rgba(111,188,246,.15); }
+.avmos-landing a:focus-visible { outline: 2px solid #6fbcf6; outline-offset: 4px; }
+@media (max-width: 700px) { .avmos-landing-shell { padding: 20px; } .avmos-landing header span:last-child { display: none; } .avmos-landing footer { flex-wrap: wrap; font-size: 8px; } .avmos-landing-content { padding: 70px 0; } .avmos-landing-content > p { font-size: 9px; line-height: 1.6; } .avmos-landing h1 { margin: 25px 0 55px; font-size: clamp(78px, 17vw, 140px); } .avmos-landing-intro { grid-template-columns: 1fr; } .avmos-landing-rule { display: none; } }
+@media (prefers-reduced-motion: reduce) { .avmos-landing-intro a { transition: none; } }

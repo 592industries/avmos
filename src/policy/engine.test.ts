@@ -69,4 +69,18 @@ describe('deterministic policy engine', () => {
     expect(decision.decision).toBe('DENIED')
     expect(decision.reason).toContain('schema validation')
   })
+
+  it('denies stale New Relic evidence', () => {
+    const decision = evaluatePolicy({
+      intent: validIntent(), policy: defaultPolicy(), spentToday: 0,
+      resource: {
+        id: 'server1', hostname: 'server1', type: 'server', status: 'critical',
+        metrics: { storageUtilization: 91 }, alerts: [],
+        lastUpdated: new Date(Date.now() - 180_000).toISOString(), source: 'newrelic',
+        telemetryStatus: 'STALE',
+      },
+    })
+    expect(decision.decision).toBe('DENIED')
+    expect(decision.checks).toContainEqual(expect.objectContaining({ name: 'fresh_telemetry', passed: false }))
+  })
 })

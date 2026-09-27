@@ -5,12 +5,15 @@ import {
   type Policy,
   type PolicyCheck,
   type PolicyDecision,
+  type InfrastructureResource,
 } from '../domain/operations'
 
 export type PolicyEvaluationInput = {
   intent: unknown
   policy: unknown
   spentToday: number
+  resource?: InfrastructureResource
+  allowDemo?: boolean
 }
 
 export function evaluatePolicy(input: PolicyEvaluationInput): PolicyDecision {
@@ -35,6 +38,10 @@ export function evaluatePolicy(input: PolicyEvaluationInput): PolicyDecision {
 
   const intent = parsedIntent.data
   const checks = buildChecks(intent, policy, input.spentToday)
+  if (input.resource) {
+    const age = Math.max(0, (Date.now() - new Date(input.resource.lastUpdated).getTime()) / 1000)
+    checks.push(check('fresh_telemetry', (input.resource.source === 'newrelic' && input.resource.telemetryStatus === 'LIVE' && age <= policy.maxTelemetryAgeSeconds) || (input.allowDemo === true && input.resource.source === 'demo'), 'Verified telemetry is fresh for this mode.', 'Verified live telemetry is missing or stale.'))
+  }
   const failures = checks.filter((check) => !check.passed)
   if (failures.length > 0) {
     return deny(

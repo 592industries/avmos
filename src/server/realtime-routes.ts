@@ -26,15 +26,16 @@ function wsRoute(
     const url = new URL(c.req.url)
     const token = url.searchParams.get('token')
 
-    let auth: VerifyResult | null = null
-    if (token) {
-      auth = (await verifyJwt(jwtConfig(c.env), token)).result
-      if (!auth) return new Response('Unauthorized', { status: 401 })
-    }
+    if (!token) return new Response('Unauthorized', { status: 401 })
+    const auth: VerifyResult | null = (await verifyJwt(jwtConfig(c.env), token)).result
+    if (!auth) return new Response('Unauthorized', { status: 401 })
+    if (id !== `app:${c.env.DEEPSPACE_APP_ID}`) return new Response('Forbidden', { status: 403 })
+    const role = await resolveAppRole(c.env, auth.userId)
+    if (!role) return new Response('Forbidden', { status: 403 })
     const roomRequest = authenticatedRoomRequest(
       c.req.raw,
       auth,
-      auth ? await extraIdentity?.(auth, c.env) : undefined,
+      { role, ...(await extraIdentity?.(auth, c.env)) },
     )
 
     const namespace = doNamespace(c.env)
@@ -132,6 +133,7 @@ export function registerRealtimeRoutes(app: Hono<AppContext>): void {
     const token = url.searchParams.get('token')
     const auth = token ? (await verifyJwt(jwtConfig(c.env), token)).result : null
     if (!auth) return new Response('Unauthorized', { status: 401 })
+    if (!(await resolveAppRole(c.env, auth.userId))) return new Response('Forbidden', { status: 403 })
 
     const role = await resolveDocsYjsRole(c.env, docId, auth.userId)
     if (!role) return new Response('Forbidden', { status: 403 })

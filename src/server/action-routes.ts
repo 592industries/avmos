@@ -28,7 +28,8 @@
  */
 
 import type { Hono } from 'hono'
-import { apiWorkerFetch, normalizeApiError } from 'deepspace/worker'
+import { apiWorkerFetch, normalizeApiError, resolveAppRole } from 'deepspace/worker'
+import { z } from 'zod/v4'
 import type { ActionResult, ActionTools, VerifyResult } from 'deepspace/worker'
 import { actions } from '../actions/index.js'
 import { integrations } from '../integrations.js'
@@ -36,10 +37,36 @@ import type { AppContext, Env } from '../../worker.js'
 
 type ResolveAuth = (req: Request, env: Env) => Promise<VerifyResult | null>
 
+const ACTION_POLICY = {
+  runAgentCycle: { schema: z.object({ mode: z.enum(['live', 'demo-approved', 'demo-denied']).optional() }).strict(), ownerOnly: true, roles: ['admin'], perMinute: 4, idempotencyRequired: true },
+  askOperator: { schema: z.object({ question: z.string().trim().min(1).max(500) }).strict(), ownerOnly: false, roles: ['admin', 'member'], perMinute: 20, idempotencyRequired: false },
+  setupXrplTrustLine: { schema: z.object({}).strict(), ownerOnly: true, roles: ['admin'], perMinute: 1, idempotencyRequired: true },
+  reconcileXrplOperation: { schema: z.object({ operationId: z.string().min(1).max(100) }).strict(), ownerOnly: true, roles: ['admin'], perMinute: 4, idempotencyRequired: true },
+} as const
+
+function error(code: string, message: string, requestId: string, status: number): Response {
+  return Response.json({ error: { code, message, requestId } }, { status })
+}
+
 export function registerActionRoutes(app: Hono<AppContext>, resolveAuth: ResolveAuth): void {
-  app.post('/api/actions/:name', async (c) => {
+  app.get('/api/health', async (c) => {
+    const requestId = crypto.randomUUID()
     const auth = await resolveAuth(c.req.raw, c.env)
-    if (!auth) return c.json({ error: 'Unauthorized' }, 401)
+    if (!auth) return error('AUTH_REQUIRED', 'Authentication is required.', requestId, 401)
+    const role = await resolveAppRole(c.env, auth.userId)
+    if (!role) return error('FORBIDDEN', 'Application membership is required.', requestId, 403)
+    const telemetryConfigured = Boolean(c.env.NEW_RELIC_USER_KEY && c.env.NEW_RELIC_ACCOUNT_ID && c.env.NEW_RELIC_ENTITY_GUID)
+    const reasoningConfigured = Boolean(c.env.GROK_API_KEY)
+    const destinationConfigured = Boolean(c.env.XRPL_VENDOR_DESTINATION)
+    return c.json({ requestId, status: telemetryConfigured && reasoningConfigured && destinationConfigured ? 'CONFIGURED' : 'SETUP_REQUIRED', services: { newRelic: telemetryConfigured, grok: reasoningConfigured, xrplDestination: destinationConfigured }, modes: { autonomous: c.env.AUTONOMOUS_RUNS_ENABLED === 'true', demo: c.env.DEMO_MODE === 'true', settlement: c.env.XRPL_EXECUTION_MODE === 'live' ? 'TESTNET' : 'SIMULATED' } })
+  })
+  app.post('/api/actions/:name', async (c) => {
+    const requestId = crypto.randomUUID()
+    if (c.req.header('Origin') && c.req.header('Origin') !== new URL(c.req.url).origin) {
+      return error('FORBIDDEN', 'Cross-origin actions are not allowed.', requestId, 403)
+    }
+    const auth = await resolveAuth(c.req.raw, c.env)
+    if (!auth) return error('AUTH_REQUIRED', 'Authentication is required.', requestId, 401)
     // `resolveAuth` may accept a cookie session, which carries no bearer token
     // — and `VerifyResult` exposes the claims, not the raw JWT. Actions need
     // the token itself (user-billed integrations forward it), so a call
@@ -47,17 +74,47 @@ export function registerActionRoutes(app: Hono<AppContext>, resolveAuth: Resolve
     // rather than crashing on a missing header further down.
     const authHeader = c.req.header('Authorization') ?? ''
     const callerJwt = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : ''
-    if (!callerJwt) return c.json({ error: 'Unauthorized' }, 401)
+    if (!callerJwt) return error('AUTH_REQUIRED', 'A bearer token is required.', requestId, 401)
     // Who called: actions run RBAC-off and can bill the owner, and the
     // platform's request log carries no user — this line is the attribution.
     // The name is a decoded path segment, so it is quoted, never interpolated raw.
-    console.info(`[action] ${JSON.stringify(c.req.param('name'))} caller=${auth.userId}`)
     const name = c.req.param('name')
+    if (!(name in ACTION_POLICY)) return error('VALIDATION_ERROR', 'Action not found.', requestId, 404)
+    const policy = ACTION_POLICY[name as keyof typeof ACTION_POLICY]
+    const role = await resolveAppRole(c.env, auth.userId)
+    if (!role || !(policy.roles as readonly string[]).includes(role) || (policy.ownerOnly && auth.userId !== c.env.OWNER_USER_ID)) {
+      return error('FORBIDDEN', 'You cannot run this action.', requestId, 403)
+    }
+    if (!c.req.header('Content-Type')?.toLowerCase().startsWith('application/json')) {
+      return error('VALIDATION_ERROR', 'JSON content type is required.', requestId, 415)
+    }
+    const raw = await c.req.text()
+    if (raw.length > 8192) return error('VALIDATION_ERROR', 'Request body is too large.', requestId, 413)
+    let body: unknown
+    try { body = JSON.parse(raw) } catch { return error('VALIDATION_ERROR', 'Malformed JSON.', requestId, 400) }
+    const parsed = policy.schema.safeParse(body)
+    if (!parsed.success) return error('VALIDATION_ERROR', 'Invalid action parameters.', requestId, 400)
+    const idempotencyKey = c.req.header('Idempotency-Key')
+    if (policy.idempotencyRequired && (!idempotencyKey || !z.uuid().safeParse(idempotencyKey).success)) {
+      return error('VALIDATION_ERROR', 'A UUID Idempotency-Key header is required.', requestId, 400)
+    }
+    const namespace = c.env.RECORD_ROOMS
+    const stub = namespace.get(namespace.idFromName(`app:${c.env.DEEPSPACE_APP_ID}`))
+    const rate = await stub.fetch(new Request('https://internal/internal/avmos/rate', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: `${auth.userId}:${name}`, limit: policy.perMinute }),
+    }))
+    if (!rate.ok || !(await rate.json() as { allowed: boolean }).allowed) {
+      return error('RATE_LIMITED', 'Action rate limit exceeded.', requestId, 429)
+    }
+    console.info(JSON.stringify({ event: 'action.received', requestId, action: name, userId: auth.userId }))
     const action = actions[name]
-    if (!action) return c.json({ error: 'Action not found' }, 404)
-    const params = await c.req.json<Record<string, unknown>>()
+    const params = { ...parsed.data, ...(idempotencyKey ? { idempotencyKey } : {}) }
     const tools = createActionTools(c.env, auth.userId, callerJwt)
     const result = await action({ userId: auth.userId, params, tools, env: c.env, callerJwt })
+    if ((result as { code?: string }).code === 'IDEMPOTENCY_CONFLICT') {
+      return error('IDEMPOTENCY_CONFLICT', 'This key belongs to a different request.', requestId, 409)
+    }
     return c.json(result as unknown as Record<string, unknown>)
   })
 }

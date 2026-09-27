@@ -1,0 +1,99 @@
+:root {
+  --avmos-black: #080c11;
+  --avmos-surface: #10171e;
+  --avmos-surface-raised: #151f28;
+  --avmos-border: #2a3945;
+  --avmos-white: #f2f6f8;
+  --avmos-muted: #91a5b2;
+  --avmos-blue: #6fbcf6;
+  --avmos-success: #71d6ab;
+  --avmos-warning: #f0c578;
+  --avmos-danger: #fa918c;
+}
+
+.avmos-page { min-height: 100%; background: var(--avmos-black); color: var(--avmos-white); font-family: Inter, 'Segoe UI', Arial, sans-serif; }
+.avmos-wrap { max-width: 1580px; margin: auto; padding: 32px 36px 80px; }
+.avmos-label, .avmos-eyebrow, .avmos-kicker, .avmos-panel header small, .avmos-status small, .avmos-status strong, .avmos-util strong, .avmos-source, .avmos-trend-empty, .avmos-pipeline, .avmos-decision, .avmos-policy-metrics, .avmos-controls, .avmos-timeline, .avmos-hash { font-family: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace; }
+.avmos-label { display: block; color: var(--avmos-muted); font-size: 10px; font-weight: 700; letter-spacing: .13em; }
+.avmos-hero { border-top: 2px solid var(--avmos-white); border-bottom: 1px solid var(--avmos-border); padding: 12px 0 30px; }
+.avmos-eyebrow { display: flex; justify-content: space-between; gap: 16px; color: var(--avmos-muted); font-size: 10px; letter-spacing: .11em; }
+.avmos-hero-main { display: flex; align-items: end; justify-content: space-between; gap: 30px; padding-top: 32px; }
+.avmos-kicker { color: var(--avmos-blue); font-size: 11px; font-weight: 700; letter-spacing: .13em; }
+.avmos-hero h1 { margin: 7px 0 0; font-size: clamp(65px, 9vw, 136px); line-height: .9; letter-spacing: -.09em; font-weight: 800; }
+.avmos-mark { color: var(--avmos-blue); padding-left: 12px; font-weight: 300; }
+.avmos-descriptor { margin-top: 16px; color: var(--avmos-muted); font-size: 15px; }
+.avmos-hero-status { display: flex; gap: 14px; min-width: 260px; padding: 16px 0 8px 18px; border-left: 1px solid var(--avmos-border); }
+.avmos-status-dot { width: 8px; height: 8px; flex: none; margin-top: 4px; border-radius: 50%; background: var(--avmos-warning); }
+.avmos-status-dot.is-live { background: var(--avmos-success); box-shadow: 0 0 10px rgba(113,214,171,.35); }
+.avmos-hero-status strong { display: block; margin: 5px 0; font-size: 22px; letter-spacing: .03em; }
+.avmos-hero-status small { color: var(--avmos-muted); font: 10px Consolas, monospace; letter-spacing: .08em; }
+.avmos-status-grid { display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--avmos-border); margin: 26px 0; }
+.avmos-status { min-height: 98px; display: flex; flex-direction: column; justify-content: center; padding: 15px 22px; border-right: 1px solid var(--avmos-border); }
+.avmos-status:last-child { border-right: 0; }
+.avmos-status strong { display: block; margin: 6px 0 3px; font-size: 16px; letter-spacing: .02em; }
+.avmos-status small { color: var(--avmos-muted); font-size: 10px; letter-spacing: .08em; }
+.avmos-columns { display: grid; grid-template-columns: minmax(0, 1.7fr) minmax(320px, 1fr); gap: 18px; align-items: start; }
+.avmos-main-column, .avmos-side-column { display: grid; gap: 18px; min-width: 0; }
+.avmos-panel { border: 1px solid var(--avmos-border); background: var(--avmos-surface); transition: border-color .18s ease, box-shadow .18s ease; min-width: 0; }
+.avmos-panel:hover { border-color: #4d6a7d; box-shadow: 0 0 20px rgba(65,137,184,.06); }
+.avmos-panel > header { min-height: 57px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 13px 20px; border-bottom: 1px solid var(--avmos-border); }
+.avmos-panel > header > div { display: flex; align-items: baseline; gap: 12px; }
+.avmos-panel > header span { color: var(--avmos-blue); font: 11px Consolas, monospace; }
+.avmos-panel > header h2 { font-size: 15px; font-weight: 650; letter-spacing: .01em; }
+.avmos-panel > header small { color: var(--avmos-muted); font-size: 9px; letter-spacing: .08em; text-align: right; }
+.avmos-panel-body { padding: 22px; }
+.avmos-telemetry { display: grid; grid-template-columns: 1fr 1fr; gap: 25px; }
+.avmos-telemetry h2 { margin: 10px 0 5px; font-size: 28px; letter-spacing: -.04em; }
+.avmos-telemetry p { color: var(--avmos-muted); font-size: 11px; }
+.avmos-telemetry .avmos-source { margin-top: 21px; color: var(--avmos-blue); letter-spacing: .07em; }
+.avmos-util strong { display: block; margin: 9px 0; font-size: 42px; line-height: 1; letter-spacing: -.07em; }
+.avmos-meter { height: 5px; margin: 17px 0 10px; background: #344450; }
+.avmos-meter span { display: block; height: 100%; max-width: 100%; background: var(--avmos-blue); }
+.avmos-util small { color: var(--avmos-muted); font: 10px Consolas, monospace; }
+.avmos-trend { margin-top: 30px; border-top: 1px solid var(--avmos-border); padding-top: 20px; }
+.avmos-trend > div { display: flex; justify-content: space-between; gap: 12px; }
+.avmos-trend small { color: var(--avmos-muted); font: 10px Consolas, monospace; }
+.avmos-trend svg { display: block; width: 100%; height: 100px; margin: 12px 0; color: var(--avmos-blue); border-bottom: 1px solid var(--avmos-border); }
+.avmos-trend-empty { margin-top: 30px; border-top: 1px solid var(--avmos-border); padding-top: 17px; color: var(--avmos-muted); font-size: 10px; letter-spacing: .1em; }
+.avmos-pipeline { display: grid; grid-template-columns: repeat(7, 1fr); gap: 5px; }
+.avmos-step { position: relative; min-height: 65px; padding: 10px 8px; border: 1px solid var(--avmos-border); background: var(--avmos-surface-raised); }
+.avmos-step span { display: block; color: var(--avmos-blue); font-size: 10px; }
+.avmos-step strong { display: block; margin-top: 9px; font-size: 9px; letter-spacing: .04em; }
+.avmos-step svg { position: absolute; right: -10px; top: 26px; z-index: 1; color: var(--avmos-blue); background: var(--avmos-surface); }
+.avmos-rule { margin: 20px 0; color: var(--avmos-muted); font-size: 12px; line-height: 1.6; }
+.avmos-controls { display: flex; flex-wrap: wrap; gap: 10px; }
+.avmos-controls button { min-height: 38px; font-size: 10px; letter-spacing: .04em; }
+.avmos-notice, .avmos-answer { margin-top: 15px; padding: 12px; color: var(--avmos-white); background: var(--avmos-surface-raised); border-left: 2px solid var(--avmos-blue); font-size: 12px; }
+.avmos-empty { color: var(--avmos-muted); font-size: 12px; line-height: 1.5; }
+.avmos-policy-metrics { display: grid; gap: 0; }
+.avmos-policy-metrics > div { display: flex; justify-content: space-between; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--avmos-border); }
+.avmos-policy-metrics dt { color: var(--avmos-muted); font-size: 10px; }
+.avmos-policy-metrics dd { font-size: 11px; text-align: right; }
+.avmos-footnote { margin-top: 16px; color: var(--avmos-muted); font-size: 11px; line-height: 1.5; }
+.avmos-operation-value span { color: var(--avmos-muted); font: 10px Consolas, monospace; }
+.avmos-operation-value strong { display: block; margin: 5px 0; font-size: 24px; }
+.avmos-operation > p:not(.avmos-decision) { margin: 11px 0; color: var(--avmos-muted); font-size: 12px; line-height: 1.5; }
+.avmos-decision { display: inline-block; padding: 4px 7px; border: 1px solid var(--avmos-danger); color: var(--avmos-danger); font-size: 10px; }
+.avmos-decision.approved { border-color: var(--avmos-success); color: var(--avmos-success); }
+.avmos-checks { display: grid; max-height: 190px; overflow: auto; border-top: 1px solid var(--avmos-border); }
+.avmos-checks div { display: flex; gap: 10px; padding: 7px 0; color: var(--avmos-muted); font: 10px Consolas, monospace; }
+.avmos-checks span { color: var(--avmos-success); }
+.avmos-hash { display: block; margin-top: 12px; overflow-wrap: anywhere; color: var(--avmos-blue); font-size: 10px; }
+.avmos-operation .avmos-warning { color: var(--avmos-warning) !important; }
+.avmos-question { display: flex; gap: 8px; margin-top: 10px; }
+.avmos-question input { min-width: 0; }
+.avmos-timeline { max-height: 430px; overflow-y: auto; list-style: none; padding: 0; }
+.avmos-timeline li { display: flex; gap: 14px; position: relative; padding: 0 0 20px; }
+.avmos-timeline li:not(:last-child)::before { content: ''; position: absolute; left: 4px; top: 8px; bottom: 0; border-left: 1px solid var(--avmos-border); }
+.avmos-timeline-point { flex: none; width: 9px; height: 9px; margin-top: 5px; border: 1px solid var(--avmos-blue); background: var(--avmos-surface); z-index: 1; }
+.avmos-timeline li > div { min-width: 0; width: 100%; }
+.avmos-timeline strong { font-size: 11px; letter-spacing: .04em; }
+.avmos-timeline small { float: right; color: var(--avmos-muted); font-size: 10px; }
+.avmos-timeline p { margin-top: 4px; color: var(--avmos-muted); font-size: 10px; overflow-wrap: anywhere; }
+.avmos-timeline code { display: block; margin-top: 5px; color: var(--avmos-blue); font-size: 10px; overflow-wrap: anywhere; }
+.avmos-page :is(a, button, input):focus-visible { outline: 2px solid var(--avmos-blue); outline-offset: 3px; }
+
+@media (max-width: 1150px) { .avmos-columns { grid-template-columns: minmax(0, 1.3fr) minmax(300px, 1fr); } .avmos-pipeline { grid-template-columns: repeat(4, 1fr); } .avmos-step:nth-child(4) svg { display: none; } }
+@media (max-width: 850px) { .avmos-wrap { padding: 24px 20px 60px; } .avmos-columns { grid-template-columns: 1fr; } .avmos-status-grid { grid-template-columns: repeat(2, 1fr); } .avmos-status:nth-child(2) { border-right: 0; } .avmos-status:nth-child(-n+2) { border-bottom: 1px solid var(--avmos-border); } }
+@media (max-width: 540px) { .avmos-wrap { padding: 18px 14px 50px; } .avmos-eyebrow span { display: none; } .avmos-hero-main { display: block; padding-top: 27px; } .avmos-hero h1 { font-size: 72px; } .avmos-kicker { max-width: 300px; font-size: 9px; line-height: 1.5; } .avmos-hero-status { margin-top: 25px; } .avmos-status { padding: 13px; min-height: 90px; } .avmos-status strong { font-size: 12px; } .avmos-panel > header { padding: 13px; } .avmos-panel > header small { max-width: 100px; } .avmos-panel-body { padding: 16px; } .avmos-telemetry { grid-template-columns: 1fr; } .avmos-pipeline { grid-template-columns: repeat(2, 1fr); } .avmos-step:nth-child(even) svg { display: none; } .avmos-controls { display: grid; } }
+@media (prefers-reduced-motion: reduce) { .avmos-panel { transition: none; } .avmos-status-dot.is-live { box-shadow: none; } }

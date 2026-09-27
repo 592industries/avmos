@@ -1,10 +1,7 @@
 /**
  * AI Tool Definitions — converts DeepSpace BUILT_IN_TOOLS to Vercel AI SDK tools.
  *
- * The assistant can read AND modify data. Per-collection RBAC at the DO
- * layer is the actual security boundary — the user's role determines what
- * each tool call is allowed to do, regardless of what's in this allowlist.
- * Trim entries below if you want a stricter assistant for your app.
+ * The AVMOS assistant is read-only. Operational changes use explicit actions.
  */
 
 import { jsonSchema, tool } from 'ai'
@@ -20,9 +17,6 @@ const ALLOWED_TOOL_NAMES = [
   'schema.describe',
   'records.query',
   'records.get',
-  'records.create',
-  'records.update',
-  'records.delete',
   'user.current',
 ]
 
@@ -55,15 +49,8 @@ export function buildSystemPrompt(appName: string, schemas: CollectionSchema[]):
 
   return [
     `You are the assistant for the "${appName}" app on DeepSpace.`,
-    "You can read and modify the user's data via the available tools. The",
-    "user's own role and permissions still apply at the data layer — your",
-    'tool calls run as the calling user, so you can only do what they could.',
-    '',
-    'Be careful with mutations:',
-    '- Confirm intent before destructive actions (delete, bulk update).',
-    '- Operate only on collections the user explicitly mentioned.',
-    '- After a successful write, briefly confirm what changed.',
-    '- If a write is denied (RBAC), tell the user plainly — do not retry blindly.',
+    'You can inspect application data with read-only tools.',
+    'You cannot authorize policy, reserve a budget, or execute an operation.',
     '',
     'Use tools to look up facts before answering. Do not invent data.',
     'If data is missing, say so plainly. Keep answers concise.',

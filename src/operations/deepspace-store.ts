@@ -1,6 +1,8 @@
 import type { ActionTools } from 'deepspace/worker'
 import type { AuditEvent, InfrastructureResource, TelemetryTrend } from '../domain/operations'
 import type { OperationAction, OperationsStore } from './orchestrator'
+import type { ReserveRequest, ReserveResult } from './guard'
+import type { Env } from '../../worker'
 
 type RecordEnvelope<T> = {
   recordId: string
@@ -9,7 +11,33 @@ type RecordEnvelope<T> = {
 }
 
 export class DeepSpaceOperationsStore implements OperationsStore {
-  constructor(private readonly tools: ActionTools) {}
+  constructor(private readonly tools: ActionTools, private readonly env: Env) {}
+
+  private async guard(path: string, body: unknown): Promise<Response> {
+    const namespace = this.env.RECORD_ROOMS
+    const stub = namespace.get(namespace.idFromName(`app:${this.env.DEEPSPACE_APP_ID}`))
+    return stub.fetch(new Request(`https://internal/internal/avmos/${path}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    }))
+  }
+
+  async reserve(request: ReserveRequest): Promise<ReserveResult> {
+    const response = await this.guard('reserve', request)
+    if (!response.ok) throw new Error('Operation reservation unavailable.')
+    return response.json() as Promise<ReserveResult>
+  }
+
+  async transition(operationId: string, state: 'EXECUTING' | 'SUCCEEDED' | 'FAILED' | 'UNKNOWN'): Promise<void> {
+    const response = await this.guard('transition', { operationId, state })
+    if (!response.ok) throw new Error('Operation transition unavailable.')
+  }
+
+  async getAction(operationId: string): Promise<OperationAction | null> {
+    const result = await this.tools.get('actions', operationId)
+    if (!result.success) return null
+    const record = (result.data as unknown as { record?: { data?: OperationAction } }).record
+    return record?.data ? { ...record.data, id: operationId } : null
+  }
 
   async recordResource(resource: InfrastructureResource, trend: TelemetryTrend): Promise<void> {
     await expectSuccess(
@@ -19,12 +47,15 @@ export class DeepSpaceOperationsStore implements OperationsStore {
           hostname: resource.hostname,
           type: resource.type,
           status: resource.status,
-          telemetryStatus: 'CONNECTED',
+          telemetryStatus: resource.telemetryStatus ?? 'ERROR',
           telemetrySource: resource.source,
-          historicalStatus: 'CONNECTED',
+          historicalStatus: trend.source === 'demo' ? 'DEMO' : 'LIVE',
           historicalSource: trend.source,
           storageUtilization: resource.metrics.storageUtilization / 100,
           metrics: resource.metrics,
+          trendPoints: trend.points,
+          ...(resource.freshnessSeconds !== undefined ? { freshnessSeconds: resource.freshnessSeconds } : {}),
+          ...(resource.sourceEntityId ? { sourceEntityId: resource.sourceEntityId } : {}),
           alerts: resource.alerts,
           lastObservedAt: resource.lastUpdated,
         },
@@ -67,6 +98,11 @@ export class DeepSpaceOperationsStore implements OperationsStore {
           reasoning: action.reasoning,
           policyDecision: action.policyDecision,
           executionStatus: action.executionStatus,
+          ...(action.policyId ? { policyId: action.policyId } : {}),
+          ...(action.policyHash ? { policyHash: action.policyHash } : {}),
+          ...(action.policySnapshot ? { policySnapshot: action.policySnapshot } : {}),
+          ...(action.operationFingerprint ? { operationFingerprint: action.operationFingerprint } : {}),
+          ...(action.auditStatus ? { auditStatus: action.auditStatus } : {}),
           ...(action.execution ? { execution: action.execution } : {}),
           createdAt: action.createdAt,
         },

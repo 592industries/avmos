@@ -37,6 +37,7 @@ export async function runTask(name: string, env: Env): Promise<void> {
   if (name !== 'observe-infrastructure') throw new Error(`Unknown cron task: ${name}`)
   if (env.AUTONOMOUS_RUNS_ENABLED !== 'true') return
   const tools = createActionTools(env, env.OWNER_USER_ID, env.APP_OWNER_JWT)
-  const result = await executeAgentCycle(tools, env, 'happy')
+  const slot = Math.floor(Date.now() / (15 * 60_000))
+  const result = await executeAgentCycle(tools, env, 'live', `cron-${env.NEW_RELIC_RESOURCE_ID ?? 'server1'}-${slot}`)
   if (!result.success) throw new Error(result.error)
 }

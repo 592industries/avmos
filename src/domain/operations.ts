@@ -33,7 +33,11 @@ export const infrastructureResourceSchema = z.object({
   }),
   alerts: z.array(z.string()),
   lastUpdated: z.string().datetime(),
-  source: z.enum(['librenms', 'demo']),
+  receivedAt: z.string().datetime().optional(),
+  sourceEntityId: z.string().optional(),
+  telemetryStatus: z.enum(['LIVE', 'STALE', 'OFFLINE', 'ERROR', 'DEMO']).optional(),
+  freshnessSeconds: z.number().nonnegative().optional(),
+  source: z.enum(['newrelic', 'demo']),
 })
 
 export type InfrastructureResource = z.infer<typeof infrastructureResourceSchema>
@@ -49,7 +53,7 @@ export const telemetryTrendSchema = z.object({
       }),
     )
     .min(2),
-  source: z.enum(['timescale', 'demo']),
+  source: z.enum(['newrelic', 'demo']),
 })
 
 export type TelemetryTrend = z.infer<typeof telemetryTrendSchema>
@@ -66,6 +70,7 @@ export const policySchema = z.object({
   allowedAgents: z.array(z.string()).min(1),
   currency: z.literal(CURRENCY),
   requireEvidence: z.boolean().default(true),
+  maxTelemetryAgeSeconds: z.number().int().positive().default(120),
   updatedAt: z.string().datetime(),
 })
 
@@ -105,6 +110,8 @@ export const auditEventTypes = [
   'EXECUTION_STARTED',
   'EXECUTION_SUCCEEDED',
   'EXECUTION_FAILED',
+  'EXECUTION_UNKNOWN',
+  'BUDGET_RESERVED',
 ] as const
 
 export type AuditEventType = (typeof auditEventTypes)[number]
@@ -122,7 +129,7 @@ export type AuditEvent = {
 }
 
 export type ExecutionResult = {
-  status: 'SUCCEEDED' | 'FAILED'
+  status: 'SUCCEEDED' | 'FAILED' | 'UNKNOWN'
   mode: 'SIMULATED' | 'TESTNET'
   transactionHash?: string
   destination: string
@@ -156,5 +163,6 @@ export const defaultPolicy = (): Policy => ({
   allowedAgents: ['infrastructure-agent'],
   currency: CURRENCY,
   requireEvidence: true,
+  maxTelemetryAgeSeconds: 120,
   updatedAt: new Date().toISOString(),
 })

@@ -12,28 +12,20 @@
 
 import { Link } from 'react-router-dom'
 import { APP_NAME } from '../constants'
+import './landing.css'
 
 export default function Landing() {
   return (
-    <div
-      data-testid="static-landing"
-      className="flex min-h-screen flex-col items-center justify-center px-6 text-center"
-    >
-      <p className="mb-3 text-sm uppercase tracking-widest text-muted-foreground">{APP_NAME}</p>
-      <h1 className="mb-4 max-w-2xl text-4xl font-bold tracking-tight text-foreground sm:text-5xl">
-        A DeepSpace app with a static front door
-      </h1>
-      <p className="mb-8 max-w-md text-muted-foreground">
-        This landing page ships no auth call and no realtime connection — it's a
-        plain static page. The live app, with sign-in and synced data, lives
-        behind the link below.
-      </p>
-      <Link
-        to="/home"
-        className="inline-flex items-center gap-2 rounded-full bg-primary px-5 py-2.5 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
-      >
-        Enter the app
-      </Link>
-    </div>
+    <main data-testid="static-landing" className="avmos-landing">
+      <div className="avmos-landing-shell">
+        <header><span>AVMOS / SYSTEM 01</span><span>AUTONOMOUS OPERATIONS</span></header>
+        <div className="avmos-landing-content">
+          <p>AUTONOMOUS VERIFICATION, MONITORING & OPERATIONS SYSTEM</p>
+          <h1>{APP_NAME}<span>/</span></h1>
+          <div className="avmos-landing-intro"><div className="avmos-landing-rule" /><div><h2>Observe. Verify. Operate.</h2><p>Autonomous infrastructure operations with governed execution. Every proposal is checked against deterministic policy before a protected executor can act.</p><Link to="/home">ENTER MISSION CONTROL <span aria-hidden="true">↗</span></Link></div></div>
+        </div>
+        <footer><span>REAL TELEMETRY</span><span>DETERMINISTIC AUTHORIZATION</span><span>AUDITABLE SETTLEMENT</span></footer>
+      </div>
+    </main>
   )
 }

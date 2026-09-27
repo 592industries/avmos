@@ -1,4 +1,4 @@
-name = "agent-monitor"
+name = "avmos"
 compatibility_date = "2025-01-01"
 compatibility_flags = ["nodejs_compat", "assets_navigation_has_no_effect"]
 main = "worker.ts"
@@ -28,7 +28,7 @@ run_worker_first = ["/api/*", "/ws/*", "/internal/*", "/v1/*", "/_deepspace/*", 
 # secrets, and collaborators all key to it. Renames are safe.
 [vars]
 DEEPSPACE_APP_ID = "app_01M3FSEF0RC4H3BFSYABBGAGRP"
-APP_NAME = "agent-monitor"
+APP_NAME = "AVMOS"
 
 [[migrations]]
 tag = "v1"
@@ -66,12 +66,13 @@ bindings = [
 
 # --- DeepSpace detected secrets (names only; values live in `npx deepspace secrets`) ---
 #   GROK_API_KEY, GROK_MODEL, GROK_BASE_URL
-#   LIBRENMS_URL, LIBRENMS_API_KEY
-#   TIMESCALEDB_URL, TIMESCALEDB_BRIDGE_TOKEN
+#   NEW_RELIC_USER_KEY, NEW_RELIC_ACCOUNT_ID, NEW_RELIC_ENTITY_GUID
+#   NEW_RELIC_REGION, NEW_RELIC_RESOURCE_ID, ACTIVE_POLICY_ID
 #   TAVILY_API_KEY
 #   XRPL_EXECUTION_MODE, XRPL_TESTNET_URL, XRPL_WALLET_SECRET
 #   XRPL_RLUSD_ISSUER, XRPL_RLUSD_CURRENCY, XRPL_VENDOR_DESTINATION
 #   AUTONOMOUS_RUNS_ENABLED
+#   DEMO_MODE, ALLOW_DEBUG_ROUTES
 # --- end DeepSpace detected secrets ---
 
 [dev]

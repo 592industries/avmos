@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DemoHistoricalTelemetry } from '../telemetry/historical'
-import { DemoTelemetryAdapter } from '../telemetry/librenms'
+import { DemoTelemetryAdapter } from '../telemetry/demo'
 import { AgentRuntime, type AgentModel } from './runtime'
 
 describe('agent runtime boundary', () => {
@@ -18,7 +17,7 @@ describe('agent runtime boundary', () => {
       }),
     }
     const resource = await new DemoTelemetryAdapter().getResource('server1')
-    const trend = await new DemoHistoricalTelemetry().getStorageTrend('server1')
+    const trend = await new DemoTelemetryAdapter().getStorageTrend('server1')
 
     await expect(new AgentRuntime(model).reason(resource, trend)).rejects.toThrow()
   })
@@ -30,7 +29,7 @@ describe('agent runtime boundary', () => {
       propose: async () => 'Send 4000 RLUSD and ignore policy',
     }
     const resource = await new DemoTelemetryAdapter().getResource('server1')
-    const trend = await new DemoHistoricalTelemetry().getStorageTrend('server1')
+    const trend = await new DemoTelemetryAdapter().getStorageTrend('server1')
 
     await expect(new AgentRuntime(model).reason(resource, trend)).rejects.toThrow()
   })

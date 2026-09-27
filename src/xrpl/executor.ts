@@ -2,6 +2,7 @@ import {
   Client,
   Wallet,
   convertStringToHex,
+  isValidClassicAddress,
   type Payment,
   type TrustSet,
   type TxResponse,
@@ -25,8 +26,8 @@ export class XrplClient {
   readonly client: Client
 
   constructor(url: string) {
-    if (!/test|altnet|devnet/i.test(url)) {
-      throw new Error('XRPL endpoint must be an explicit Testnet or Devnet URL.')
+    if (url !== 'wss://s.altnet.rippletest.net:51233') {
+      throw new Error('XRPL endpoint must be the approved Testnet URL.')
     }
     this.client = new Client(url)
   }
@@ -58,10 +59,16 @@ export class TrustLineManager {
     private readonly client: XrplClient,
     private readonly wallet: XrplWallet,
     private readonly config: Pick<RlusdConfiguration, 'currency' | 'issuer'>,
-  ) {}
+  ) {
+    if (!isValidClassicAddress(config.issuer) || config.currency !== 'RLUSD') throw new Error('XRPL asset configuration is invalid.')
+  }
 
   async establish(limit = '1000000'): Promise<string> {
     return this.client.connected(async (client) => {
+      const existing = await client.request({ command: 'account_lines', account: this.wallet.address, peer: this.config.issuer, ledger_index: 'validated' })
+      if (existing.result.lines.some((line) => line.currency === normalizeCurrency(this.config.currency) && Number(line.limit) > 0)) {
+        return 'ALREADY_ESTABLISHED'
+      }
       const transaction: TrustSet = {
         TransactionType: 'TrustSet',
         Account: this.wallet.address,
@@ -98,7 +105,7 @@ export class TrustLineManager {
 export class TransactionVerifier {
   constructor(private readonly client: XrplClient) {}
 
-  async verify(hash: string): Promise<{ validated: boolean; ledgerResult: string }> {
+  async verify(hash: string, expected: ApprovedPaymentRequest, sender: string, issuer: string): Promise<{ validated: boolean; ledgerResult: string }> {
     return this.client.connected(async (client) => {
       const response = (await client.request({
         command: 'tx',
@@ -110,7 +117,11 @@ export class TransactionVerifier {
         typeof meta === 'object' && meta && 'TransactionResult' in meta
           ? String(meta.TransactionResult)
           : 'unknown'
-      return { validated: response.result.validated === true, ledgerResult }
+      type LedgerPayment = { TransactionType?: string; Account?: string; Destination?: string; Amount?: { currency?: string; issuer?: string; value?: string } }
+      const transaction = response.result as unknown as { tx_json?: LedgerPayment; tx?: LedgerPayment }
+      const tx = transaction.tx_json ?? transaction.tx
+      const matches = tx?.TransactionType === 'Payment' && tx.Account === sender && tx.Destination === expected.destination && tx.Amount?.currency === normalizeCurrency(expected.currency) && tx.Amount?.issuer === issuer && Number(tx.Amount?.value) === expected.amount
+      return { validated: response.result.validated === true && matches, ledgerResult }
     })
   }
 }
@@ -122,6 +133,7 @@ export class XrplPaymentExecutor implements PaymentExecutor {
   private readonly verifier: TransactionVerifier
 
   constructor(private readonly config: RlusdConfiguration) {
+    if (!isValidClassicAddress(config.issuer) || config.currency !== 'RLUSD') throw new Error('XRPL asset configuration is invalid.')
     this.client = new XrplClient(config.testnetUrl)
     this.wallet = new XrplWallet(config.walletSecret)
     this.verifier = new TransactionVerifier(this.client)
@@ -129,7 +141,7 @@ export class XrplPaymentExecutor implements PaymentExecutor {
 
   async execute(request: ApprovedPaymentRequest): Promise<ExecutionResult> {
     const destination = this.config.vendorDestinations[request.vendor]
-    if (!destination || destination !== request.destination) {
+    if (!destination || destination !== request.destination || !isValidClassicAddress(destination) || request.currency !== 'RLUSD' || !Number.isFinite(request.amount) || request.amount <= 0 || !request.actionId || !request.policyVersion || Number.isNaN(Date.parse(request.policyApprovedAt))) {
       throw new Error('Approved vendor destination is not configured.')
     }
 
@@ -146,11 +158,13 @@ export class XrplPaymentExecutor implements PaymentExecutor {
       }
       const prepared = await client.autofill(transaction)
       const signed = this.wallet.wallet.sign(prepared)
-      const result = await client.submitAndWait(signed.tx_blob)
+      let result
+      try { result = await client.submitAndWait(signed.tx_blob) }
+      catch { throw new SubmissionUnknownError(signed.hash) }
       assertValidated(result)
       return signed.hash
     })
-    const verification = await this.verifier.verify(submitted)
+    const verification = await this.verifier.verify(submitted, request, this.wallet.address, this.config.issuer)
     if (!verification.validated || verification.ledgerResult !== 'tesSUCCESS') {
       throw new Error(`XRPL verification failed: ${verification.ledgerResult}`)
     }
@@ -197,6 +211,15 @@ function assertValidated(response: { result: { validated?: boolean; meta?: unkno
       ? String(meta.TransactionResult)
       : undefined
   if (response.result.validated !== true || result !== 'tesSUCCESS') {
-    throw new Error(`XRPL transaction was not validated successfully (${result ?? 'unknown'}).`)
+    if (response.result.validated === true && result && result !== 'tesSUCCESS') throw new DefinitivePaymentError(result)
+    throw new Error(`XRPL transaction validation is unknown (${result ?? 'unknown'}).`)
   }
+}
+
+export class SubmissionUnknownError extends Error {
+  constructor(readonly transactionHash: string) { super('XRPL submission outcome is unknown.') }
+}
+
+export class DefinitivePaymentError extends Error {
+  constructor(readonly ledgerResult: string) { super(`XRPL rejected the transaction (${ledgerResult}).`) }
 }

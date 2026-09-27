@@ -64,7 +64,6 @@ function AuthBoot({ children }: { children: ReactNode }) {
 
   return (
     <RecordProvider
-      allowAnonymous
       onWriteError={(e) =>
         e.kind === 'permission' ? warning(e.title, e.detail) : error(e.title, e.detail)
       }

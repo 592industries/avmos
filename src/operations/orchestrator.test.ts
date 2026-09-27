@@ -1,8 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { AgentRuntime, DemoAgentModel } from '../agent/runtime'
 import { defaultPolicy, type AuditEvent, type InfrastructureResource } from '../domain/operations'
-import { DemoHistoricalTelemetry } from '../telemetry/historical'
-import { DemoTelemetryAdapter } from '../telemetry/librenms'
+import { DemoTelemetryAdapter } from '../telemetry/demo'
 import type { PaymentExecutor } from '../xrpl/executor'
 import { OperationsOrchestrator, type OperationAction, type OperationsStore } from './orchestrator'
 
@@ -15,6 +14,9 @@ class MemoryStore implements OperationsStore {
   async recordAction(action: OperationAction) { this.actions.push(action) }
   async appendAudit(event: AuditEvent) { this.audits.push(event) }
   async spentToday() { return 0 }
+  async reserve(request: { operationId: string }) { return { allowed: true as const, operationId: request.operationId } }
+  async transition() {}
+  async getAction(operationId: string) { return this.actions.find((action) => action.id === operationId) ?? null }
 }
 
 function orchestrator(model: DemoAgentModel, executor: PaymentExecutor, store = new MemoryStore()) {
@@ -22,12 +24,12 @@ function orchestrator(model: DemoAgentModel, executor: PaymentExecutor, store = 
     store,
     value: new OperationsOrchestrator(
       new DemoTelemetryAdapter(),
-      new DemoHistoricalTelemetry(),
       new AgentRuntime(model),
       defaultPolicy(),
       executor,
       store,
       { 'approved-storage-vendor': 'rProtectedVendorTestnet' },
+      true,
     ),
   }
 }

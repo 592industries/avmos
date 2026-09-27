@@ -1,4 +1,4 @@
-name: Agent-Monitor CI
+name: AVMOS CI
 
 on:
   pull_request:
@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: agent-monitor-${{ github.ref }}
+  group: avmos-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -47,6 +47,9 @@ jobs:
           install -d -m 700 "$HOME/.deepspace"
           printf '%s' "$DEEPSPACE_SESSION" > "$HOME/.deepspace/session"
           chmod 600 "$HOME/.deepspace/session"
+      - name: Require DeepSpace session for release validation
+        if: ${{ github.event_name == 'push' && env.DEEPSPACE_SESSION == '' }}
+        run: exit 1
       - if: ${{ env.DEEPSPACE_SESSION != '' }}
         run: npm test
 

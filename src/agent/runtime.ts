@@ -5,10 +5,12 @@ import {
   type TelemetryTrend,
 } from '../domain/operations'
 import type { ResearchProvider, ResearchResult } from '../research/tavily'
+import { forecastStorage, type TrendForecast } from '../telemetry/trend'
 
 export type AgentObservation = {
   resource: InfrastructureResource
   trend: TelemetryTrend
+  forecast: TrendForecast
   research?: ResearchResult
 }
 
@@ -46,7 +48,7 @@ export class AgentRuntime {
       )
     }
 
-    const raw = await this.model.propose({ resource, trend, research }, signal)
+    const raw = await this.model.propose({ resource, trend, forecast: forecastStorage(trend), research }, signal)
     const candidate = normalizeProposal(raw)
     const intent = actionIntentSchema.parse(candidate.intent)
     return { reasoning: candidate.reasoning, intent }
@@ -58,6 +60,7 @@ function normalizeProposal(raw: unknown): { reasoning: string; intent: unknown }
   if (!isObject(parsed) || typeof parsed.reasoning !== 'string' || !('intent' in parsed)) {
     throw new Error('Model response did not contain a valid reasoning and intent envelope.')
   }
+  if (parsed.reasoning.length > 4000) throw new Error('Model reasoning exceeds the allowed length.')
   return { reasoning: parsed.reasoning, intent: parsed.intent }
 }
 

@@ -6,7 +6,6 @@
  */
 
 import { Hono } from 'hono'
-import { cors } from 'hono/cors'
 import {
   armCronRoom,
   CanvasRoom,
@@ -33,6 +32,7 @@ import {
   resolveAuth,
 } from './src/server/http-routes.js'
 import { registerRealtimeRoutes } from './src/server/realtime-routes.js'
+import { allowRequest, lookupOperation, reserveOperation, transitionOperation } from './src/operations/guard.js'
 
 // Dynamic deploy reads this manifest to create the app's DO bindings.
 export const __DO_MANIFEST__ = [
@@ -45,8 +45,38 @@ export const __DO_MANIFEST__ = [
 ] as const satisfies DOManifest
 
 export class AppRecordRoom extends RecordRoom<Env> {
-  constructor(state: DurableObjectState, env: Env) {
-    super(state, env, schemas, { ownerUserId: env.OWNER_USER_ID })
+  constructor(private readonly operationState: DurableObjectState, env: Env) {
+    super(operationState, env, schemas, { ownerUserId: env.OWNER_USER_ID })
+  }
+
+  override async fetch(request: Request): Promise<Response> {
+    const path = new URL(request.url).pathname
+    if (path === '/internal/avmos/reserve' && request.method === 'POST') {
+      try { return Response.json(await reserveOperation(this.operationState.storage, await request.json())) }
+      catch { return Response.json({ error: 'Invalid operation reservation.' }, { status: 400 }) }
+    }
+    if (path === '/internal/avmos/transition' && request.method === 'POST') {
+      try {
+        const body = await request.json() as { operationId: string; state: 'RESERVED' | 'EXECUTING' | 'SUCCEEDED' | 'FAILED' | 'UNKNOWN' }
+        await transitionOperation(this.operationState.storage, body.operationId, body.state)
+        return Response.json({ ok: true })
+      } catch { return Response.json({ error: 'Invalid operation transition.' }, { status: 400 }) }
+    }
+    if (path === '/internal/avmos/rate' && request.method === 'POST') {
+      try {
+        const body = await request.json() as { key: string; limit: number }
+        if (!body.key || body.key.length > 200 || !Number.isInteger(body.limit) || body.limit < 1 || body.limit > 1000) throw new Error('Invalid rate limit.')
+        return Response.json({ allowed: await allowRequest(this.operationState.storage, body.key, body.limit) })
+      } catch { return Response.json({ error: 'Invalid rate request.' }, { status: 400 }) }
+    }
+    if (path === '/internal/avmos/lookup' && request.method === 'POST') {
+      try {
+        const body = await request.json() as { idempotencyKey: string; requestHash: string }
+        if (!body.idempotencyKey || !body.requestHash) throw new Error('Invalid lookup.')
+        return Response.json(await lookupOperation(this.operationState.storage, body.idempotencyKey, body.requestHash))
+      } catch { return Response.json({ error: 'Invalid lookup.' }, { status: 400 }) }
+    }
+    return super.fetch(request)
   }
 }
 
@@ -115,10 +145,13 @@ export interface Env extends DOBindings<typeof __DO_MANIFEST__> {
   GROK_API_KEY?: string
   GROK_MODEL?: string
   GROK_BASE_URL?: string
-  LIBRENMS_URL?: string
-  LIBRENMS_API_KEY?: string
-  TIMESCALEDB_URL?: string
-  TIMESCALEDB_BRIDGE_TOKEN?: string
+  NEW_RELIC_USER_KEY?: string
+  NEW_RELIC_ACCOUNT_ID?: string
+  NEW_RELIC_ENTITY_GUID?: string
+  NEW_RELIC_REGION?: string
+  NEW_RELIC_RESOURCE_ID?: string
+  DEMO_MODE?: string
+  ACTIVE_POLICY_ID?: string
   TAVILY_API_KEY?: string
   XRPL_TESTNET_URL?: string
   XRPL_WALLET_SECRET?: string
@@ -139,7 +172,31 @@ export interface Env extends DOBindings<typeof __DO_MANIFEST__> {
 export type AppContext = { Bindings: Env }
 
 const app = new Hono<AppContext>()
-app.use('/api/*', cors())
+async function rateLimitRequest(c: { env: Env; req: { header(name: string): string | undefined; path: string } }, limit: number): Promise<boolean> {
+  const namespace = c.env.RECORD_ROOMS
+  const stub = namespace.get(namespace.idFromName(`app:${c.env.DEEPSPACE_APP_ID}`))
+  const response = await stub.fetch(new Request('https://internal/internal/avmos/rate', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ key: `${c.req.path}:${c.req.header('CF-Connecting-IP') ?? 'unknown'}`.slice(0, 200), limit }),
+  }))
+  return response.ok && (await response.json() as { allowed: boolean }).allowed
+}
+app.use('/api/ai/*', async (c, next) => {
+  if (!(await rateLimitRequest(c, 30))) return c.json({ error: { code: 'RATE_LIMITED', message: 'Too many AI requests.', requestId: crypto.randomUUID() } }, 429)
+  await next()
+})
+app.use('/api/integrations/*', async (c, next) => {
+  if (!(await rateLimitRequest(c, 60))) return c.json({ error: { code: 'RATE_LIMITED', message: 'Too many integration requests.', requestId: crypto.randomUUID() } }, 429)
+  await next()
+})
+app.use('*', async (c, next) => {
+  await next()
+  c.header('X-Content-Type-Options', 'nosniff')
+  c.header('Referrer-Policy', 'strict-origin-when-cross-origin')
+  c.header('Permissions-Policy', 'camera=(), microphone=(), geolocation=()')
+  c.header('Strict-Transport-Security', 'max-age=31536000; includeSubDomains')
+  c.header('Content-Security-Policy', "object-src 'none'; base-uri 'self'; frame-ancestors 'none'")
+})
 // A Durable Object exists only once something fetches it, and the CronRoom
 // arms its alarm in that first fetch — so wake it from the request path, or a
 // deployed schedule waits for a visitor. Once per isolate; no-op without tasks.

@@ -1,80 +1,95 @@
 import type { ActionHandler, ActionTools } from 'deepspace/worker'
+import { isValidClassicAddress } from 'xrpl'
 import type { Env } from '../../worker'
 import { AgentRuntime, DemoAgentModel } from '../agent/runtime'
 import { GrokAgentModel } from '../agent/grok'
 import { defaultPolicy, policySchema, type Policy } from '../domain/operations'
 import { DeepSpaceOperationsStore } from '../operations/deepspace-store'
+import { operationRequestHash } from '../operations/guard'
 import { OperationsOrchestrator } from '../operations/orchestrator'
 import { OptionalResearchProvider, TavilyResearchProvider } from '../research/tavily'
-import { DemoHistoricalTelemetry, TimescaleTelemetryBridge } from '../telemetry/historical'
-import { DemoTelemetryAdapter, LibreNmsAdapter } from '../telemetry/librenms'
+import { DemoTelemetryAdapter } from '../telemetry/demo'
+import { NewRelicTelemetryAdapter } from '../telemetry/newrelic'
 import {
   SimulatedPaymentExecutor,
   TrustLineManager,
   XrplClient,
   XrplPaymentExecutor,
   XrplWallet,
+  TransactionVerifier,
 } from '../xrpl/executor'
 
-type DemoMode = 'happy' | 'denial'
+type CycleMode = 'live' | 'demo-approved' | 'demo-denied'
 
 const runAgentCycle: ActionHandler<Env> = async ({ userId, params, tools, env }) => {
   if (userId !== env.OWNER_USER_ID) return { success: false, error: 'Forbidden: owner only' }
-  const mode: DemoMode = params.mode === 'denial' ? 'denial' : 'happy'
-  return executeAgentCycle(tools, env, mode)
+  const mode: CycleMode = params.mode === 'demo-denied' ? 'demo-denied' : params.mode === 'demo-approved' ? 'demo-approved' : 'live'
+  if (mode !== 'live' && env.DEMO_MODE !== 'true') return { success: false, error: 'Demo mode is disabled.' }
+  return executeAgentCycle(tools, env, mode, String(params.idempotencyKey ?? crypto.randomUUID()))
 }
 
-export async function executeAgentCycle(tools: ActionTools, env: Env, mode: DemoMode) {
-  const policy = await resolvePolicy(tools)
-  const destinations = {
-    'approved-storage-vendor':
-      env.XRPL_VENDOR_DESTINATION ?? 'rDemoApprovedStorageVendorTestnetDestination',
+export async function executeAgentCycle(tools: ActionTools, env: Env, mode: CycleMode, idempotencyKey: string = crypto.randomUUID()) {
+  const resourceId = env.NEW_RELIC_RESOURCE_ID ?? 'server1'
+  const namespace = env.RECORD_ROOMS
+  const stub = namespace.get(namespace.idFromName(`app:${env.DEEPSPACE_APP_ID}`))
+  const lookup = await stub.fetch(new Request('https://internal/internal/avmos/lookup', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ idempotencyKey, requestHash: await operationRequestHash(resourceId, mode) }),
+  }))
+  if (!lookup.ok) return { success: false as const, error: 'Operation idempotency service is unavailable.' }
+  const existing = await lookup.json() as { code: 'NEW' | 'REPLAY' | 'IDEMPOTENCY_CONFLICT'; operationId?: string }
+  if (existing.code === 'IDEMPOTENCY_CONFLICT') return { success: false as const, code: 'IDEMPOTENCY_CONFLICT', error: 'Idempotency key conflicts with a different request.' }
+  if (existing.code === 'REPLAY') {
+    const action = existing.operationId ? await new DeepSpaceOperationsStore(tools, env).getAction(existing.operationId) : null
+    if (!action) return { success: false as const, error: 'Original operation is still in progress.' }
+    return { success: true as const, data: { actionId: action.id, decision: action.policyDecision.decision, executionStatus: action.executionStatus, transactionHash: action.execution?.transactionHash, simulation: action.execution?.mode === 'SIMULATED' } }
   }
-  const telemetry =
-    env.LIBRENMS_URL && env.LIBRENMS_API_KEY
-      ? new LibreNmsAdapter({ baseUrl: env.LIBRENMS_URL, apiKey: env.LIBRENMS_API_KEY })
-      : new DemoTelemetryAdapter()
-  const historical = env.TIMESCALEDB_URL
-    ? new TimescaleTelemetryBridge(env.TIMESCALEDB_URL, env.TIMESCALEDB_BRIDGE_TOKEN)
-    : new DemoHistoricalTelemetry()
-  const model =
-    mode === 'happy' && env.GROK_API_KEY
-      ? new GrokAgentModel({
-          apiKey: env.GROK_API_KEY,
-          model: env.GROK_MODEL,
-          baseUrl: env.GROK_BASE_URL,
-        })
-      : new DemoAgentModel(mode === 'denial')
+  const demo = mode !== 'live'
+  if (demo && env.DEMO_MODE !== 'true') return { success: false as const, error: 'Demo mode is disabled.' }
+  if (!env.XRPL_VENDOR_DESTINATION || !isValidClassicAddress(env.XRPL_VENDOR_DESTINATION)) return { success: false as const, error: 'XRPL vendor destination is not configured with a valid classic address.' }
+  if (!demo && (!env.NEW_RELIC_USER_KEY || !env.NEW_RELIC_ACCOUNT_ID || !env.NEW_RELIC_ENTITY_GUID || !env.GROK_API_KEY)) {
+    return { success: false as const, error: 'Live New Relic and Grok configuration is incomplete.' }
+  }
+  if (env.XRPL_EXECUTION_MODE === 'live' && demo) return { success: false as const, error: 'Demo evidence cannot authorize live settlement.' }
+  if (env.XRPL_EXECUTION_MODE && !['live', 'simulated'].includes(env.XRPL_EXECUTION_MODE)) return { success: false as const, error: 'XRPL execution mode is invalid.' }
+  if (env.XRPL_EXECUTION_MODE === 'live' && (!env.XRPL_WALLET_SECRET || !env.XRPL_RLUSD_ISSUER || !env.XRPL_RLUSD_CURRENCY || !env.XRPL_TESTNET_URL)) {
+    return { success: false as const, error: 'Live XRPL execution configuration is incomplete.' }
+  }
+  try {
+  const policy = await resolvePolicy(tools, env, demo)
+  const destinations = { 'approved-storage-vendor': env.XRPL_VENDOR_DESTINATION }
+  const telemetry = demo ? new DemoTelemetryAdapter() : new NewRelicTelemetryAdapter({
+    userKey: env.NEW_RELIC_USER_KEY!, accountId: Number(env.NEW_RELIC_ACCOUNT_ID),
+    entityGuid: env.NEW_RELIC_ENTITY_GUID!, region: (env.NEW_RELIC_REGION ?? 'US') as 'US' | 'EU' | 'JP',
+    resourceId: env.NEW_RELIC_RESOURCE_ID ?? 'server1',
+  })
+  const model = demo ? new DemoAgentModel(mode === 'demo-denied') : new GrokAgentModel({
+    apiKey: env.GROK_API_KEY!, model: env.GROK_MODEL, baseUrl: env.GROK_BASE_URL,
+  })
   const research = new OptionalResearchProvider(
     env.TAVILY_API_KEY ? new TavilyResearchProvider(env.TAVILY_API_KEY) : undefined,
   )
   const executor =
-    env.XRPL_EXECUTION_MODE === 'live' &&
-    env.XRPL_WALLET_SECRET &&
-    env.XRPL_RLUSD_ISSUER &&
-    env.XRPL_RLUSD_CURRENCY &&
-    env.XRPL_TESTNET_URL &&
-    env.XRPL_VENDOR_DESTINATION
+    env.XRPL_EXECUTION_MODE === 'live'
       ? new XrplPaymentExecutor({
-          testnetUrl: env.XRPL_TESTNET_URL,
-          walletSecret: env.XRPL_WALLET_SECRET,
-          issuer: env.XRPL_RLUSD_ISSUER,
-          currency: env.XRPL_RLUSD_CURRENCY,
+          testnetUrl: env.XRPL_TESTNET_URL!,
+          walletSecret: env.XRPL_WALLET_SECRET!,
+          issuer: env.XRPL_RLUSD_ISSUER!,
+          currency: env.XRPL_RLUSD_CURRENCY!,
           vendorDestinations: destinations,
         })
       : new SimulatedPaymentExecutor()
 
   const orchestrator = new OperationsOrchestrator(
     telemetry,
-    historical,
     new AgentRuntime(model, research),
     policy,
     executor,
-    new DeepSpaceOperationsStore(tools),
+    new DeepSpaceOperationsStore(tools, env),
     destinations,
+    demo,
   )
-  try {
-    const result = await orchestrator.run('server1')
+    const result = await orchestrator.run(resourceId, idempotencyKey, undefined, mode)
     return {
       success: true as const,
       data: {
@@ -93,7 +108,7 @@ export async function executeAgentCycle(tools: ActionTools, env: Env, mode: Demo
   }
 }
 
-const askPhoton: ActionHandler<Env> = async ({ params, tools }) => {
+const askOperator: ActionHandler<Env> = async ({ params, tools }) => {
   const question = typeof params.question === 'string' ? params.question.trim() : ''
   if (!question || question.length > 500) {
     return { success: false, error: 'Question must contain 1-500 characters.' }
@@ -146,24 +161,75 @@ const setupXrplTrustLine: ActionHandler<Env> = async ({ userId, env }) => {
   }
 }
 
-export const actions: Record<string, ActionHandler<Env>> = {
-  runAgentCycle,
-  askPhoton,
-  setupXrplTrustLine,
+const reconcileXrplOperation: ActionHandler<Env> = async ({ userId, params, tools, env }) => {
+  if (userId !== env.OWNER_USER_ID) return { success: false, error: 'Forbidden: owner only' }
+  if (!env.XRPL_TESTNET_URL || !env.XRPL_WALLET_SECRET || !env.XRPL_RLUSD_ISSUER) return { success: false, error: 'XRPL verification configuration is incomplete.' }
+  const store = new DeepSpaceOperationsStore(tools, env)
+  const operationId = String(params.operationId)
+  const action = await store.getAction(operationId)
+  if (!action || action.executionStatus !== 'UNKNOWN' || !action.execution?.transactionHash) {
+    return { success: false, error: 'An UNKNOWN operation with a transaction hash is required.' }
+  }
+  const intent = action.actionIntent
+  const expected = {
+    actionId: operationId,
+    resourceId: action.resourceId,
+    vendor: String(intent.vendor),
+    destination: action.execution.destination,
+    amount: action.execution.amount,
+    currency: 'RLUSD' as const,
+    policyVersion: action.policyDecision.policyVersion,
+    policyApprovedAt: action.policyDecision.timestamp,
+  }
+  try {
+    const client = new XrplClient(env.XRPL_TESTNET_URL)
+    const wallet = new XrplWallet(env.XRPL_WALLET_SECRET)
+    const result = await new TransactionVerifier(client).verify(action.execution.transactionHash, expected, wallet.address, env.XRPL_RLUSD_ISSUER)
+    if (!result.validated) return { success: false, error: 'Ledger transaction is not yet validated or does not match the approved payment.' }
+    if (result.ledgerResult !== 'tesSUCCESS' && !result.ledgerResult.startsWith('tec')) return { success: false, error: 'Ledger outcome remains uncertain.' }
+    const state = result.ledgerResult === 'tesSUCCESS' ? 'SUCCEEDED' : 'FAILED'
+    await store.transition(operationId, state)
+    action.executionStatus = state
+    action.execution = { ...action.execution, status: state, ledgerResult: result.ledgerResult }
+    action.auditStatus = 'PENDING'
+    await store.recordAction(action)
+    await store.appendAudit({
+      id: `audit-${crypto.randomUUID()}`, timestamp: new Date().toISOString(), actor: 'xrpl-reconciler',
+      eventType: state === 'SUCCEEDED' ? 'EXECUTION_SUCCEEDED' : 'EXECUTION_FAILED',
+      actionId: operationId, resourceId: action.resourceId, policyVersion: action.policyDecision.policyVersion,
+      transactionHash: action.execution.transactionHash, details: { reconciled: true, ledgerResult: result.ledgerResult },
+    })
+    action.auditStatus = 'COMPLETE'
+    await store.recordAction(action)
+    return { success: true, data: { actionId: operationId, executionStatus: state, transactionHash: action.execution.transactionHash } }
+  } catch {
+    return { success: false, error: 'XRPL reconciliation could not confirm the transaction.' }
+  }
 }
 
-async function resolvePolicy(tools: ActionTools): Promise<Policy> {
+export const actions: Record<string, ActionHandler<Env>> = {
+  runAgentCycle,
+  askOperator,
+  setupXrplTrustLine,
+  reconcileXrplOperation,
+}
+
+async function resolvePolicy(tools: ActionTools, env: Env, demo: boolean): Promise<Policy> {
   const result = await tools.query('policies', { limit: 10 })
   if (!result.success) throw new Error(result.error)
   const records = (result.data as { records?: Array<{ data?: unknown }> }).records ?? []
-  for (const record of records) {
+  const active = records.flatMap((record) => {
     const parsed = policySchema.safeParse(record.data)
-    if (parsed.success && parsed.data.enabled) return parsed.data
+    return parsed.success && parsed.data.enabled ? [parsed.data] : []
+  })
+  if (env.ACTIVE_POLICY_ID) {
+    const selected = active.find((policy) => policy.id === env.ACTIVE_POLICY_ID)
+    if (!selected) throw new Error('Selected authorization policy is unavailable.')
+    return selected
   }
-  const policy = defaultPolicy()
-  const created = await tools.create('policies', policy, policy.id)
-  if (!created.success) throw new Error(created.error)
-  return policy
+  if (active.length === 1) return active[0]
+  if (active.length === 0 && demo) return defaultPolicy()
+  throw new Error('Exactly one active authorization policy is required.')
 }
 
 function extractData(value: unknown): unknown[] {
@@ -199,7 +265,7 @@ function answerFromState(
     if (!latestResource || !isObject(latestResource.metrics)) return 'No resource telemetry is recorded.'
     return `server1 is ${String(latestResource.status)} with ${String(latestResource.metrics.storageUtilization)}% storage utilization.`
   }
-  return `Agent-Monitor currently has ${state.resources.length} resource(s), ${state.actions.length} action(s), and ${state.audits.length} audit event(s).`
+  return `AVMOS currently has ${state.resources.length} resource(s), ${state.actions.length} action(s), and ${state.audits.length} audit event(s).`
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
