@@ -29,8 +29,16 @@ export async function pollInfrastructure(env: Env): Promise<void> {
     })
     const signal = AbortSignal.timeout(20_000)
     const resource = await adapter.getResource(resourceId, signal)
-    const trend = await adapter.getStorageTrend(resourceId, signal)
-    await store.recordResource(resource, trend)
+    let trend: Awaited<ReturnType<NewRelicTelemetryAdapter['getStorageTrend']>> | undefined
+    let trendStatus: 'LIVE' | 'UNAVAILABLE' | 'ERROR' = 'LIVE'
+    let trendError: string | undefined
+    try {
+      trend = await adapter.getStorageTrend(resourceId, signal)
+    } catch (error) {
+      trendError = error instanceof Error ? error.message : String(error)
+      trendStatus = /insufficient historical|trend is stale/i.test(trendError) ? 'UNAVAILABLE' : 'ERROR'
+    }
+    await store.recordResource(resource, trend, trendStatus, trendError)
   } catch (error) {
     await store.recordTelemetryFailure(resourceId, 'ERROR')
     throw error

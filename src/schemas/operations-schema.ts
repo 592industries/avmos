@@ -28,6 +28,8 @@ export const resourcesSchema: CollectionSchema = {
     { name: 'telemetrySource', storage: 'text', interpretation: 'plain', required: true },
     { name: 'historicalStatus', storage: 'text', interpretation: 'plain', required: true },
     { name: 'historicalSource', storage: 'text', interpretation: 'plain', required: true },
+    { name: 'trendStatus', storage: 'text', interpretation: 'plain' },
+    { name: 'trendError', storage: 'text', interpretation: 'plain' },
     { name: 'storageUtilization', storage: 'number', interpretation: { kind: 'percent', decimals: 0 } },
     { name: 'metrics', storage: 'text', interpretation: { kind: 'json' }, required: true },
     { name: 'trendPoints', storage: 'text', interpretation: { kind: 'json' } },

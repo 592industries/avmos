@@ -31,7 +31,7 @@ export type OperationAction = {
 }
 
 export interface OperationsStore {
-  recordResource(resource: InfrastructureResource, trend: TelemetryTrend): Promise<void>
+  recordResource(resource: InfrastructureResource, trend?: TelemetryTrend, trendStatus?: 'LIVE' | 'DEMO' | 'UNAVAILABLE' | 'ERROR', trendError?: string): Promise<void>
   recordAgentRun(agent: {
     id: string
     name: string

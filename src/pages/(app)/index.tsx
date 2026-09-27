@@ -9,6 +9,9 @@ type Resource = {
   status: string
   telemetryStatus: 'LIVE' | 'STALE' | 'OFFLINE' | 'UNAVAILABLE' | 'ERROR' | 'DEMO'
   telemetrySource: 'newrelic' | 'demo'
+  historicalStatus?: 'LIVE' | 'DEMO' | 'UNAVAILABLE' | 'ERROR'
+  trendStatus?: 'LIVE' | 'DEMO' | 'UNAVAILABLE' | 'ERROR'
+  trendError?: string
   sourceEntityId?: string
   metrics: { storageUtilization?: number; storageTotalGb?: number; storageUsedGb?: number }
   trendPoints?: Array<{ timestamp: string; value: number }>
@@ -112,7 +115,7 @@ export default function HomePage() {
               <div><span className="avmos-label">MONITORED RESOURCE</span><h2>avmos</h2><p>{resource?.lastObservedAt && Date.parse(resource.lastObservedAt) > 0 ? `LAST SUCCESSFUL OBSERVATION ${formatTime(resource.lastObservedAt)}` : 'No infrastructure observation has been recorded.'}</p><p className="avmos-source">{status === 'STALE' ? 'AUTHORIZATION PAUSED UNTIL FRESH EVIDENCE' : status === 'ERROR' || status === 'UNAVAILABLE' ? 'TELEMETRY UNAVAILABLE — NO LIVE ACTION' : resource?.sourceEntityId ? `ENTITY ${resource.sourceEntityId}` : resource?.telemetrySource === 'demo' ? 'SIMULATED EVIDENCE' : 'SOURCE UNAVAILABLE'}</p></div>
               <div className="avmos-util"><span className="avmos-label">STORAGE UTILIZATION</span><strong>{resource?.metrics.storageUtilization !== undefined && status !== 'UNAVAILABLE' && status !== 'ERROR' ? `${resource.metrics.storageUtilization.toFixed(1)}%` : 'NO CURRENT DATA'}</strong><div className="avmos-meter" role="meter" aria-label="Storage utilization" aria-valuemin={0} aria-valuemax={100} aria-valuenow={status === 'LIVE' || status === 'DEMO' ? resource?.metrics.storageUtilization : undefined}><span style={{ width: `${status === 'LIVE' || status === 'DEMO' ? resource?.metrics.storageUtilization ?? 0 : 0}%` }} /></div><small>{resource?.metrics.storageUsedGb !== undefined && resource.metrics.storageTotalGb !== undefined ? `${resource.metrics.storageUsedGb.toFixed(1)} / ${resource.metrics.storageTotalGb.toFixed(1)} GB` : 'CAPACITY DATA UNAVAILABLE'}</small></div>
             </div>
-            <Trend points={resource?.trendPoints} />
+            <Trend points={resource?.trendPoints} status={resource?.trendStatus ?? resource?.historicalStatus} />
           </Panel>
 
           <Panel number="02" title="Operation pipeline" aside="DETERMINISTIC BOUNDARY">
@@ -170,8 +173,8 @@ function observedStatus(resource: Resource) {
   if (age > 120_000) return 'STALE'
   return resource.telemetryStatus
 }
-function Trend({ points }: { points?: Array<{ timestamp: string; value: number }> }) {
-  if (!points || points.length < 2) return <div className="avmos-trend-empty">HISTORICAL TELEMETRY UNAVAILABLE</div>
+function Trend({ points, status }: { points?: Array<{ timestamp: string; value: number }>; status?: string }) {
+  if (!points || points.length < 2) return <div className="avmos-trend-empty">{status === 'ERROR' ? 'HISTORICAL TELEMETRY ERROR' : status === 'DEMO' ? 'SIMULATED HISTORICAL TELEMETRY' : 'HISTORICAL TELEMETRY UNAVAILABLE'}</div>
   const sample = points.slice(-24)
   const path = sample.map((point, index) => `${index === 0 ? 'M' : 'L'} ${(index / (sample.length - 1)) * 100} ${100 - point.value}`).join(' ')
   return <div className="avmos-trend"><div><span className="avmos-label">STORAGE TREND</span><small>{sample.length} VERIFIED SAMPLES</small></div><svg viewBox="0 0 100 100" preserveAspectRatio="none" role="img" aria-label={`Storage trend from ${sample[0].value}% to ${sample.at(-1)?.value}%`}><path d={path} fill="none" stroke="currentColor" strokeWidth="1.2" vectorEffect="non-scaling-stroke" /></svg><div><small>{formatTime(sample[0].timestamp)}</small><small>{formatTime(sample.at(-1)!.timestamp)}</small></div></div>

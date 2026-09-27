@@ -39,7 +39,8 @@ export class DeepSpaceOperationsStore implements OperationsStore {
     return record?.data ? { ...record.data, id: operationId } : null
   }
 
-  async recordResource(resource: InfrastructureResource, trend: TelemetryTrend): Promise<void> {
+  async recordResource(resource: InfrastructureResource, trend?: TelemetryTrend, trendStatus?: 'LIVE' | 'DEMO' | 'UNAVAILABLE' | 'ERROR', trendError?: string): Promise<void> {
+    const historicalStatus = trendStatus ?? (trend?.source === 'demo' ? 'DEMO' : trend ? 'LIVE' : 'UNAVAILABLE')
     await expectSuccess(
       this.tools.create(
         'resources',
@@ -49,11 +50,13 @@ export class DeepSpaceOperationsStore implements OperationsStore {
           status: resource.status,
           telemetryStatus: resource.telemetryStatus ?? 'ERROR',
           telemetrySource: resource.source,
-          historicalStatus: trend.source === 'demo' ? 'DEMO' : 'LIVE',
-          historicalSource: trend.source,
+          historicalStatus,
+          historicalSource: trend?.source ?? resource.source,
           storageUtilization: resource.metrics.storageUtilization / 100,
           metrics: resource.metrics,
-          trendPoints: trend.points,
+          trendPoints: trend?.points ?? [],
+          trendStatus: historicalStatus,
+          ...(trendError ? { trendError: trendError.slice(0, 240) } : {}),
           ...(resource.freshnessSeconds !== undefined ? { freshnessSeconds: resource.freshnessSeconds } : {}),
           ...(resource.sourceEntityId ? { sourceEntityId: resource.sourceEntityId } : {}),
           alerts: resource.alerts,
@@ -80,6 +83,7 @@ export class DeepSpaceOperationsStore implements OperationsStore {
       telemetrySource: 'newrelic',
       historicalStatus: 'UNAVAILABLE',
       historicalSource: 'newrelic',
+      trendStatus: 'UNAVAILABLE',
       ...(data?.storageUtilization !== undefined ? { storageUtilization: data.storageUtilization } : {}),
       metrics: data?.metrics ?? {},
       trendPoints: data?.trendPoints ?? [],
