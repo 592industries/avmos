@@ -179,6 +179,14 @@ export interface Env extends DOBindings<typeof __DO_MANIFEST__> {
    * an authenticated app owner/admin. deepspace dev/test set it locally.
    */
   ALLOW_DEBUG_ROUTES?: string
+  TELEMETRY_RAW_RETENTION_DAYS?: string
+  TELEMETRY_AGGREGATE_RETENTION_DAYS?: string
+  OPERATIONS_LOG_RETENTION_DAYS?: string
+  ACTION_RETENTION_DAYS?: string
+  POLICY_DECISION_RETENTION_DAYS?: string
+  ALERT_RETENTION_DAYS?: string
+  AUDIT_RETENTION_DAYS?: string
+  RETENTION_DELETE_BATCH_SIZE?: string
 }
 
 export type AppContext = { Bindings: Env }

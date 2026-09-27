@@ -19,8 +19,10 @@ export type OperationAction = {
   resourceId: string
   actionIntent: Record<string, unknown>
   reasoning: string
+  decisionSummary?: string
   policyDecision: PolicyDecision
   executionStatus: 'NOT_STARTED' | 'DENIED' | 'RESERVED' | 'EXECUTING' | 'SUCCEEDED' | 'FAILED' | 'UNKNOWN'
+  providerId?: string
   policyId?: string
   policyHash?: string
   policySnapshot?: Policy
@@ -41,6 +43,7 @@ export interface OperationsStore {
     lastRunAt: string
   }): Promise<void>
   recordAction(action: OperationAction): Promise<void>
+  recordPolicyDecision(action: OperationAction): Promise<void>
   appendAudit(event: AuditEvent): Promise<void>
   spentToday(): Promise<number>
   reserve(request: ReserveRequest): Promise<ReserveResult>
@@ -94,9 +97,8 @@ export class OperationsOrchestrator {
       model: identity.model,
       lastRunAt: new Date().toISOString(),
     })
-    await this.audit('REASONING', proposal.intent.agentId, actionId, resource.id, {
-      reasoning: proposal.reasoning,
-    })
+    const decisionSummary = summarizeDecision(proposal.reasoning)
+    await this.audit('REASONING', proposal.intent.agentId, actionId, resource.id, { decisionSummary })
     await this.audit('ACTION_PROPOSED', proposal.intent.agentId, actionId, resource.id, {
       intent: proposal.intent,
     })
@@ -107,6 +109,9 @@ export class OperationsOrchestrator {
       spentToday: await this.store.spentToday(),
       resource,
       allowDemo: this.allowDemo,
+      providerId: this.executor.providerId ?? 'xrpl-testnet',
+      authorizationScope: 'infrastructure:purchase',
+      destination: this.vendorDestinations[proposal.intent.vendor],
     })
     await this.audit('POLICY_EVALUATED', 'deterministic-policy-engine', actionId, resource.id, {
       decision,
@@ -120,15 +125,18 @@ export class OperationsOrchestrator {
       resourceId: resource.id,
       actionIntent: proposal.intent,
       reasoning: proposal.reasoning,
+      decisionSummary,
       policyDecision: decision,
       executionStatus: decision.decision === 'DENIED' ? 'DENIED' : 'NOT_STARTED',
       policyId: this.policy.id,
       policyHash,
       policySnapshot: structuredClone(this.policy),
       operationFingerprint: fingerprint,
+      providerId: this.executor.providerId ?? 'xrpl-testnet',
       auditStatus: 'PENDING',
       createdAt: new Date().toISOString(),
     }
+    await this.store.recordPolicyDecision(action)
 
     if (decision.decision === 'DENIED') {
       await this.audit('POLICY_DENIED', 'deterministic-policy-engine', actionId, resource.id, { reason: decision.reason, checks: decision.checks }, decision.policyVersion)
@@ -168,6 +176,7 @@ export class OperationsOrchestrator {
       decision,
       actionId,
       this.vendorDestinations,
+      this.executor.providerId ?? 'xrpl-testnet',
     )
     await this.store.transition(actionId, 'EXECUTING')
     action.executionStatus = 'EXECUTING'
@@ -241,6 +250,11 @@ export class OperationsOrchestrator {
   }
 }
 
+function summarizeDecision(value: string): string {
+  const singleLine = value.replace(/\s+/g, ' ').trim()
+  return (singleLine || 'No decision summary was supplied.').slice(0, 500)
+}
+
 async function sha256(value: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
@@ -256,6 +270,7 @@ function createApprovedPaymentRequest(
   decision: Extract<PolicyDecision, { decision: 'APPROVED' }>,
   actionId: string,
   destinations: Readonly<Record<string, string>>,
+  providerId: string,
 ): ApprovedPaymentRequest {
   const destination = destinations[intent.vendor]
   if (!destination) throw new Error('Approved vendor has no protected XRPL destination mapping.')
@@ -268,5 +283,7 @@ function createApprovedPaymentRequest(
     currency: intent.currency,
     policyVersion: decision.policyVersion,
     policyApprovedAt: decision.timestamp,
+      providerId,
+      authorizationScope: 'infrastructure:purchase',
   })
 }

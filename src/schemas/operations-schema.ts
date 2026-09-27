@@ -43,6 +43,106 @@ export const resourcesSchema: CollectionSchema = {
   permissions: readOnlyPermissions,
 }
 
+const telemetryColumns: CollectionSchema['columns'] = [
+  { name: 'resourceId', storage: 'text', interpretation: 'plain', required: true },
+  { name: 'provider', storage: 'text', interpretation: 'plain', required: true },
+  { name: 'metric', storage: 'text', interpretation: 'plain', required: true },
+  { name: 'value', storage: 'number', interpretation: 'plain' },
+  { name: 'unit', storage: 'text', interpretation: 'plain', required: true },
+  { name: 'status', storage: 'text', interpretation: 'plain', required: true },
+  { name: 'observedAt', storage: 'text', interpretation: { kind: 'datetime' }, required: true },
+  { name: 'receivedAt', storage: 'text', interpretation: { kind: 'datetime' }, required: true },
+  { name: 'freshnessMs', storage: 'number', interpretation: 'plain', required: true },
+  { name: 'sourceEntityGuid', storage: 'text', interpretation: 'plain' },
+  { name: 'metadata', storage: 'text', interpretation: { kind: 'json' }, required: true },
+]
+
+export const currentTelemetrySchema: CollectionSchema = {
+  name: 'current-telemetry', columns: telemetryColumns, permissions: readOnlyPermissions,
+  uniqueOn: ['resourceId', 'metric'],
+}
+
+export const telemetryObservationsSchema: CollectionSchema = {
+  name: 'telemetry-observations',
+  columns: [...telemetryColumns,
+    { name: 'hourBucket', storage: 'text', interpretation: 'plain', required: true },
+    { name: 'expiresAt', storage: 'text', interpretation: { kind: 'datetime' }, required: true },
+    { name: 'expiresOn', storage: 'text', interpretation: 'plain', required: true },
+  ],
+  uniqueOn: ['resourceId', 'metric', 'observedAt'], permissions: readOnlyPermissions,
+}
+
+export const telemetryAggregatesSchema: CollectionSchema = {
+  name: 'telemetry-aggregates',
+  columns: [
+    { name: 'resourceId', storage: 'text', interpretation: 'plain', required: true },
+    { name: 'metric', storage: 'text', interpretation: 'plain', required: true },
+    { name: 'unit', storage: 'text', interpretation: 'plain', required: true },
+    { name: 'bucketStart', storage: 'text', interpretation: { kind: 'datetime' }, required: true },
+    { name: 'bucketEnd', storage: 'text', interpretation: { kind: 'datetime' }, required: true },
+    { name: 'minimum', storage: 'number', interpretation: 'plain', required: true },
+    { name: 'maximum', storage: 'number', interpretation: 'plain', required: true },
+    { name: 'average', storage: 'number', interpretation: 'plain', required: true },
+    { name: 'sampleCount', storage: 'number', interpretation: 'plain', required: true },
+    { name: 'status', storage: 'text', interpretation: 'plain', required: true },
+    { name: 'expiresAt', storage: 'text', interpretation: { kind: 'datetime' }, required: true },
+    { name: 'expiresOn', storage: 'text', interpretation: 'plain', required: true },
+  ], uniqueOn: ['resourceId', 'metric', 'bucketStart'], permissions: readOnlyPermissions,
+}
+
+export const alertsSchema: CollectionSchema = {
+  name: 'alerts', columns: [
+    { name: 'resourceId', storage: 'text', interpretation: 'plain', required: true },
+    { name: 'metric', storage: 'text', interpretation: 'plain', required: true },
+    { name: 'severity', storage: 'text', interpretation: 'plain', required: true },
+    { name: 'status', storage: 'text', interpretation: 'plain', required: true },
+    { name: 'value', storage: 'number', interpretation: 'plain', required: true },
+    { name: 'threshold', storage: 'number', interpretation: 'plain', required: true },
+    { name: 'openedAt', storage: 'text', interpretation: { kind: 'datetime' }, required: true },
+    { name: 'updatedAt', storage: 'text', interpretation: { kind: 'datetime' }, required: true },
+    { name: 'resolvedAt', storage: 'text', interpretation: { kind: 'datetime' } },
+    { name: 'expiresAt', storage: 'text', interpretation: { kind: 'datetime' } },
+    { name: 'expiresOn', storage: 'text', interpretation: 'plain' },
+  ], permissions: readOnlyPermissions,
+}
+
+export const policyDecisionsSchema: CollectionSchema = {
+  name: 'policy-decisions', columns: [
+    { name: 'actionId', storage: 'text', interpretation: 'plain', required: true },
+    { name: 'resourceId', storage: 'text', interpretation: 'plain', required: true },
+    { name: 'policyId', storage: 'text', interpretation: 'plain', required: true },
+    { name: 'providerId', storage: 'text', interpretation: 'plain' },
+    { name: 'decision', storage: 'text', interpretation: 'plain', required: true },
+    { name: 'checks', storage: 'text', interpretation: { kind: 'json' }, required: true },
+    { name: 'decidedAt', storage: 'text', interpretation: { kind: 'datetime' }, required: true },
+    { name: 'expiresAt', storage: 'text', interpretation: { kind: 'datetime' }, required: true },
+    { name: 'expiresOn', storage: 'text', interpretation: 'plain', required: true },
+  ], permissions: readOnlyPermissions,
+}
+
+export const operationsLogSchema: CollectionSchema = {
+  name: 'operations-log', columns: [
+    { name: 'task', storage: 'text', interpretation: 'plain', required: true },
+    { name: 'status', storage: 'text', interpretation: 'plain', required: true },
+    { name: 'message', storage: 'text', interpretation: 'plain', required: true },
+    { name: 'timestamp', storage: 'text', interpretation: { kind: 'datetime' }, required: true },
+    { name: 'expiresAt', storage: 'text', interpretation: { kind: 'datetime' }, required: true },
+    { name: 'expiresOn', storage: 'text', interpretation: 'plain', required: true },
+  ], permissions: readOnlyPermissions,
+}
+
+export const retentionStatusSchema: CollectionSchema = {
+  name: 'retention-status', columns: [
+    { name: 'collection', storage: 'text', interpretation: 'plain', required: true },
+    { name: 'status', storage: 'text', interpretation: 'plain', required: true },
+    { name: 'deleted', storage: 'number', interpretation: 'plain', required: true },
+    { name: 'oldestExpiresAt', storage: 'text', interpretation: { kind: 'datetime' } },
+    { name: 'lastRunAt', storage: 'text', interpretation: { kind: 'datetime' }, required: true },
+    { name: 'cursorDate', storage: 'text', interpretation: 'plain' },
+    { name: 'error', storage: 'text', interpretation: 'plain' },
+  ], permissions: readOnlyPermissions,
+}
+
 export const policiesSchema: CollectionSchema = {
   name: 'policies',
   columns: [
@@ -65,6 +165,8 @@ export const policiesSchema: CollectionSchema = {
     { name: 'allowedVendors', storage: 'text', interpretation: { kind: 'json' }, required: true },
     { name: 'allowedResources', storage: 'text', interpretation: { kind: 'json' }, required: true },
     { name: 'allowedAgents', storage: 'text', interpretation: { kind: 'json' }, required: true },
+    { name: 'allowedProviders', storage: 'text', interpretation: { kind: 'json' } },
+    { name: 'authorizationScopes', storage: 'text', interpretation: { kind: 'json' } },
     { name: 'currency', storage: 'text', interpretation: 'plain', required: true },
     { name: 'requireEvidence', storage: 'number', interpretation: { kind: 'boolean' }, required: true },
     { name: 'maxTelemetryAgeSeconds', storage: 'number', interpretation: 'plain' },
@@ -83,7 +185,9 @@ export const actionsSchema: CollectionSchema = {
     { name: 'agentId', storage: 'text', interpretation: 'plain', required: true },
     { name: 'resourceId', storage: 'text', interpretation: 'plain', required: true },
     { name: 'actionIntent', storage: 'text', interpretation: { kind: 'json' }, required: true },
-    { name: 'reasoning', storage: 'text', interpretation: 'plain', required: true },
+    { name: 'reasoning', storage: 'text', interpretation: 'plain' },
+    { name: 'decisionSummary', storage: 'text', interpretation: 'plain' },
+    { name: 'providerId', storage: 'text', interpretation: 'plain' },
     { name: 'policyDecision', storage: 'text', interpretation: { kind: 'json' }, required: true },
     { name: 'executionStatus', storage: 'text', interpretation: 'plain', required: true },
     { name: 'policyId', storage: 'text', interpretation: 'plain' },
@@ -93,6 +197,8 @@ export const actionsSchema: CollectionSchema = {
     { name: 'auditStatus', storage: 'text', interpretation: 'plain' },
     { name: 'execution', storage: 'text', interpretation: { kind: 'json' } },
     { name: 'createdAt', storage: 'text', interpretation: { kind: 'datetime' }, required: true },
+    { name: 'expiresAt', storage: 'text', interpretation: { kind: 'datetime' } },
+    { name: 'expiresOn', storage: 'text', interpretation: 'plain' },
   ],
   permissions: readOnlyPermissions,
 }
@@ -108,6 +214,8 @@ export const auditEventsSchema: CollectionSchema = {
     { name: 'policyVersion', storage: 'text', interpretation: 'plain' },
     { name: 'details', storage: 'text', interpretation: { kind: 'json' }, required: true },
     { name: 'transactionHash', storage: 'text', interpretation: 'plain' },
+    { name: 'expiresAt', storage: 'text', interpretation: { kind: 'datetime' } },
+    { name: 'expiresOn', storage: 'text', interpretation: 'plain' },
   ],
   permissions: readOnlyPermissions,
 }

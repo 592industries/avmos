@@ -58,7 +58,7 @@ export function registerActionRoutes(app: Hono<AppContext>, resolveAuth: Resolve
     const telemetryConfigured = Boolean(c.env.NEW_RELIC_USER_KEY && c.env.NEW_RELIC_ACCOUNT_ID && c.env.NEW_RELIC_ENTITY_GUID)
     const reasoningConfigured = Boolean(c.env.GROK_API_KEY)
     const destinationConfigured = Boolean(c.env.XRPL_VENDOR_DESTINATION)
-    return c.json({ requestId, status: telemetryConfigured && reasoningConfigured && destinationConfigured ? 'CONFIGURED' : 'SETUP_REQUIRED', services: { newRelic: telemetryConfigured, grok: reasoningConfigured, xrplDestination: destinationConfigured }, modes: { autonomous: c.env.AUTONOMOUS_RUNS_ENABLED === 'true', demo: c.env.DEMO_MODE === 'true', settlement: c.env.XRPL_EXECUTION_MODE === 'live' ? 'TESTNET' : 'SIMULATED' } })
+    return c.json({ requestId, status: telemetryConfigured && reasoningConfigured && destinationConfigured ? 'CONFIGURED' : 'SETUP_REQUIRED', services: { newRelic: telemetryConfigured, grok: reasoningConfigured, xrplDestination: destinationConfigured }, modes: { autonomous: c.env.AUTONOMOUS_RUNS_ENABLED === 'true', demo: c.env.DEMO_MODE === 'true', settlement: c.env.XRPL_EXECUTION_MODE === 'live' ? 'TESTNET' : 'SIMULATED' }, retention: { rawTelemetryDays: Number(c.env.TELEMETRY_RAW_RETENTION_DAYS) || 7, aggregateTelemetryDays: Number(c.env.TELEMETRY_AGGREGATE_RETENTION_DAYS) || 30, operationsLogDays: Number(c.env.OPERATIONS_LOG_RETENTION_DAYS) || 7, actionsDays: Number(c.env.ACTION_RETENTION_DAYS) || 30, policyDecisionDays: Number(c.env.POLICY_DECISION_RETENTION_DAYS) || 90, alertsDays: Number(c.env.ALERT_RETENTION_DAYS) || 30, auditDays: Number(c.env.AUDIT_RETENTION_DAYS) || 180 } })
   })
   app.post('/api/actions/:name', async (c) => {
     const requestId = crypto.randomUUID()

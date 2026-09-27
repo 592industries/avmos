@@ -1,8 +1,9 @@
 import type { ActionTools } from 'deepspace/worker'
-import type { AuditEvent, InfrastructureResource, TelemetryTrend } from '../domain/operations'
+import type { AuditEvent, InfrastructureResource, TelemetryObservation, TelemetryTrend } from '../domain/operations'
 import type { OperationAction, OperationsStore } from './orchestrator'
 import type { ReserveRequest, ReserveResult } from './guard'
 import type { Env } from '../../worker'
+import { expiry, hourBucket, retentionDays } from '../telemetry/retention'
 
 type RecordEnvelope<T> = {
   recordId: string
@@ -52,7 +53,7 @@ export class DeepSpaceOperationsStore implements OperationsStore {
           telemetrySource: resource.source,
           historicalStatus,
           historicalSource: trend?.source ?? resource.source,
-          storageUtilization: resource.metrics.storageUtilization / 100,
+          ...(resource.metrics.storageUtilization !== undefined ? { storageUtilization: resource.metrics.storageUtilization / 100 } : {}),
           metrics: resource.metrics,
           trendPoints: trend?.points ?? [],
           trendStatus: historicalStatus,
@@ -67,6 +68,31 @@ export class DeepSpaceOperationsStore implements OperationsStore {
         resource.id,
       ),
     )
+  }
+
+  async recordTelemetrySnapshot(resource: InfrastructureResource, observations: TelemetryObservation[]): Promise<void> {
+    await this.recordResource(resource)
+    const expiration = expiry(retentionDays(this.env).observations)
+    for (const observation of observations) {
+      const data = { ...observation, hourBucket: hourBucket(observation.observedAt), ...expiration }
+      await expectSuccess(this.tools.create('current-telemetry', observation, `${observation.resourceId}:${observation.metric}`))
+      await expectSuccess(this.tools.create('telemetry-observations', data, `obs:${observation.resourceId}:${observation.metric}:${Date.parse(observation.observedAt)}`))
+    }
+    const storage = observations.find((item) => item.metric === 'storage_utilization')
+    if (storage?.value !== undefined && storage.status === 'LIVE') await this.updateStorageAlert(storage)
+  }
+
+  private async updateStorageAlert(observation: TelemetryObservation): Promise<void> {
+    const id = `${observation.resourceId}:storage_utilization`
+    const existing = await this.tools.get<{ status?: string; openedAt?: string }>('alerts', id)
+    const current = existing.success ? existing.data.record?.data : undefined
+    const severity = observation.value! >= 90 ? 'CRITICAL' : observation.value! >= 75 ? 'WARNING' : 'HEALTHY'
+    if (severity !== 'HEALTHY') {
+      const now = new Date().toISOString()
+      await expectSuccess(this.tools.create('alerts', { resourceId: observation.resourceId, metric: observation.metric, severity, status: 'ACTIVE', value: observation.value, threshold: severity === 'CRITICAL' ? 90 : 75, openedAt: current?.openedAt ?? now, updatedAt: now, expiresAt: '9999-12-31T23:59:59.999Z', expiresOn: '9999-12-31' }, id))
+    } else if (current?.status === 'ACTIVE') {
+      const now = new Date(); await expectSuccess(this.tools.update('alerts', id, { status: 'RESOLVED', severity: 'RESOLVED', value: observation.value, updatedAt: now.toISOString(), resolvedAt: now.toISOString(), ...expiry(retentionDays(this.env).alerts, now) }))
+    }
   }
 
   async recordTelemetryFailure(resourceId: string, status: 'UNAVAILABLE' | 'ERROR'): Promise<void> {
@@ -93,6 +119,24 @@ export class DeepSpaceOperationsStore implements OperationsStore {
       lastQueryAt: new Date().toISOString(),
       lastQueryStatus: status,
     }, resourceId))
+    const failedAt = new Date().toISOString()
+    for (const metric of ['cpu_utilization', 'memory_utilization', 'storage_utilization', 'network_receive_bytes_per_second', 'network_transmit_bytes_per_second'] as const) {
+      const id = `${resourceId}:${metric}`
+      const current = await this.tools.get<Record<string, unknown>>('current-telemetry', id)
+      const prior = current.success ? current.data.record?.data : undefined
+      await expectSuccess(this.tools.create('current-telemetry', {
+        ...(prior ?? {}),
+        resourceId,
+        provider: 'new_relic',
+        metric,
+        unit: metric.startsWith('network_') ? 'bytes_per_second' : 'percent',
+        observedAt: typeof prior?.observedAt === 'string' ? prior.observedAt : failedAt,
+        receivedAt: failedAt,
+        freshnessMs: typeof prior?.freshnessMs === 'number' ? prior.freshnessMs : 0,
+        status,
+        metadata: typeof prior?.metadata === 'object' && prior.metadata ? prior.metadata : {},
+      }, id))
+    }
   }
 
   async recordAgentRun(agent: {
@@ -126,7 +170,8 @@ export class DeepSpaceOperationsStore implements OperationsStore {
           agentId: action.agentId,
           resourceId: action.resourceId,
           actionIntent: action.actionIntent,
-          reasoning: action.reasoning,
+          ...(action.decisionSummary ? { decisionSummary: action.decisionSummary } : {}),
+          ...(action.providerId ? { providerId: action.providerId } : {}),
           policyDecision: action.policyDecision,
           executionStatus: action.executionStatus,
           ...(action.policyId ? { policyId: action.policyId } : {}),
@@ -136,10 +181,16 @@ export class DeepSpaceOperationsStore implements OperationsStore {
           ...(action.auditStatus ? { auditStatus: action.auditStatus } : {}),
           ...(action.execution ? { execution: action.execution } : {}),
           createdAt: action.createdAt,
+          ...expiry(retentionDays(this.env).actions, new Date(action.createdAt)),
         },
         action.id,
       ),
     )
+  }
+
+  async recordPolicyDecision(action: OperationAction): Promise<void> {
+    const decidedAt = action.policyDecision.timestamp
+    await expectSuccess(this.tools.create('policy-decisions', { actionId: action.id, resourceId: action.resourceId, policyId: action.policyId ?? 'unknown', ...(action.providerId ? { providerId: action.providerId } : {}), decision: action.policyDecision.decision, checks: action.policyDecision.checks, decidedAt, ...expiry(retentionDays(this.env).decisions, new Date(decidedAt)) }, action.id))
   }
 
   async appendAudit(event: AuditEvent): Promise<void> {
@@ -155,6 +206,7 @@ export class DeepSpaceOperationsStore implements OperationsStore {
           ...(event.policyVersion ? { policyVersion: event.policyVersion } : {}),
           details: event.details,
           ...(event.transactionHash ? { transactionHash: event.transactionHash } : {}),
+          ...expiry(retentionDays(this.env).audit, new Date(event.timestamp)),
         },
         event.id,
       ),

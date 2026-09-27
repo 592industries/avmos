@@ -2,7 +2,7 @@
 
 ## System context and data flow
 
-The browser authenticates through DeepSpace and reads RecordRoom projections over an authenticated realtime connection. Owner-only action requests enter the Worker with a verified JWT and an idempotency key. CronRoom calls the same `executeAgentCycle` service when autonomous runs are enabled. The service fetches a configured New Relic entity through NerdGraph, normalizes current and historical `StorageSample` data, computes a deterministic trend, and sends only evidence to Grok. A Zod-validated intent passes to deterministic policy. The RecordRoom Durable Object atomically reserves budget and a resource remediation lock. Only then does the protected executor sign a payment or run an explicit simulation. Action and audit records are stored in DeepSpace.
+The public homepage mounts authentication only and cannot subscribe to operational records. Protected console routes authenticate through DeepSpace and read RecordRoom projections over a realtime connection. A leased CronRoom poller is the only production New Relic reader: it normalizes SystemSample, StorageSample, and NetworkSample data into current rows and bounded observations. Hourly tasks create aggregates and prune expired buckets. Agent cycles read this stored evidence, then pass a validated proposal through deterministic policy, an atomic budget reservation, and the selected protected provider. Action and audit records preserve the verified outcome.
 
 ## Trust boundaries
 

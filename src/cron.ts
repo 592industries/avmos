@@ -31,15 +31,24 @@ import type { Env } from '../worker'
 import { executeAgentCycle } from './actions'
 import { createActionTools } from './server/action-routes'
 import { pollInfrastructure } from './telemetry/poller'
+import { aggregateTelemetry, cleanupRetention } from './telemetry/maintenance'
 
 export const tasks: CronTask[] = [
   { name: 'poll-infrastructure', intervalMinutes: 1 },
   { name: 'operate-infrastructure', intervalMinutes: 15 },
+  { name: 'aggregate-telemetry', intervalMinutes: 60 },
+  { name: 'cleanup-retention', intervalMinutes: 60 },
 ]
 
 export async function runTask(name: string, env: Env): Promise<void> {
   if (name === 'poll-infrastructure') {
     await pollInfrastructure(env)
+    return
+  }
+  if (name === 'aggregate-telemetry' || name === 'cleanup-retention') {
+    const tools = createActionTools(env, env.OWNER_USER_ID, env.APP_OWNER_JWT)
+    if (name === 'aggregate-telemetry') await aggregateTelemetry(tools, env)
+    else await cleanupRetention(tools, env)
     return
   }
   if (name !== 'operate-infrastructure') throw new Error(`Unknown cron task: ${name}`)

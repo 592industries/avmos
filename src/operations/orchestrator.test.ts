@@ -12,6 +12,7 @@ class MemoryStore implements OperationsStore {
   async recordResource(_resource: InfrastructureResource) {}
   async recordAgentRun() {}
   async recordAction(action: OperationAction) { this.actions.push(action) }
+  async recordPolicyDecision() {}
   async appendAudit(event: AuditEvent) { this.audits.push(event) }
   async spentToday() { return 0 }
   async reserve(request: { operationId: string }) { return { allowed: true as const, operationId: request.operationId } }

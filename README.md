@@ -14,7 +14,7 @@ New Relic StorageSample → server poll → shared DeepSpace resource + historic
   → XRPL Testnet executor (or explicit simulation) → verification → DeepSpace audit
 ```
 
-The DeepSpace Worker provides authenticated actions, role checks, RecordRoom state, realtime subscriptions, CronRoom scheduling, and deployment. The `/` route is the dashboard; `/home` redirects there. A minute CronRoom task pulls New Relic data once per app through a short Durable Object lease and writes the `avmos` resource to shared records. Browser tabs receive updates through DeepSpace realtime. Autonomous operation runs are a separate 15-minute task and remain disabled by default. Tavily runs only when the owner opts into external remediation research for a manual cycle; its outcome and source titles/URLs are audited, and it has no authorization role.
+The DeepSpace Worker provides authenticated actions, role checks, RecordRoom state, realtime subscriptions, CronRoom scheduling, and deployment. `/` is the public product site, `/dashboard` is the authenticated operations console, and `/home` redirects to `/`. A minute CronRoom task pulls New Relic data once per app through a short Durable Object lease and stores normalized current and historical records for `avmos`. Browser tabs receive those records through DeepSpace realtime. Hourly tasks aggregate telemetry and prune expired records in bounded batches. Autonomous operation runs are separate and remain disabled by default.
 
 ## Security and execution
 
@@ -22,6 +22,7 @@ The DeepSpace Worker provides authenticated actions, role checks, RecordRoom sta
 - Actions require verified bearer JWTs and application roles. Financial actions require the app owner and a UUID `Idempotency-Key`. The operator assistant has read-only tools.
 - An operation reservation serializes budget checks and blocks repeat remediation on the same resource, action, and vendor. Successful operations retain a 24-hour cooldown. An unknown XRPL outcome keeps its reservation until reconciliation.
 - The executor accepts an approved payment request, checks the configured vendor destination, and connects only to `wss://s.altnet.rippletest.net:51233`. It verifies the ledger result separately. `XRPL_EXECUTION_MODE=simulated` is the safe default.
+- DeepSpace stores current telemetry separately from seven-day raw observations and thirty-day hourly aggregates. Actions, policy decisions, operational logs, alerts, and audit records have explicit configurable retention periods.
 - DeepSpace audit events and action records record the policy decision and settlement state. A ledger outcome and audit persistence have separate statuses; audit failure must never trigger an automatic payment retry.
 
 ## Local development

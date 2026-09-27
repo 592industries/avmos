@@ -11,7 +11,17 @@ import type { ApprovedPaymentRequest, ExecutionResult } from '../domain/operatio
 
 export interface PaymentExecutor {
   readonly mode?: 'SIMULATED' | 'TESTNET'
+  readonly providerId?: string
   execute(request: ApprovedPaymentRequest, signal?: AbortSignal): Promise<ExecutionResult>
+}
+export interface PaymentProvider extends PaymentExecutor {
+  readonly providerId: string
+  readonly displayName: string
+  readonly supportedCurrencies: readonly string[]
+  readonly supportedActions: readonly string[]
+  authorize(request: ApprovedPaymentRequest): Promise<ApprovedPaymentRequest>
+  getStatus(request: ApprovedPaymentRequest, transactionHash: string): Promise<'SUCCEEDED' | 'FAILED' | 'UNKNOWN'>
+  reconcile(request: ApprovedPaymentRequest, transactionHash: string): Promise<'SUCCEEDED' | 'FAILED' | 'UNKNOWN'>
 }
 
 export type RlusdConfiguration = {
@@ -126,8 +136,12 @@ export class TransactionVerifier {
   }
 }
 
-export class XrplPaymentExecutor implements PaymentExecutor {
+export class XrplPaymentExecutor implements PaymentProvider {
   readonly mode = 'TESTNET' as const
+  readonly providerId = 'xrpl-testnet'
+  readonly displayName = 'XRPL Testnet'
+  readonly supportedCurrencies = ['RLUSD'] as const
+  readonly supportedActions = ['purchase_storage'] as const
   private readonly client: XrplClient
   private readonly wallet: XrplWallet
   private readonly verifier: TransactionVerifier
@@ -179,10 +193,17 @@ export class XrplPaymentExecutor implements PaymentExecutor {
       timestamp: new Date().toISOString(),
     }
   }
+  async authorize(request: ApprovedPaymentRequest) { if (request.providerId !== this.providerId || request.authorizationScope !== 'infrastructure:purchase') throw new Error('Provider authorization is invalid.'); return request }
+  async getStatus(request: ApprovedPaymentRequest, transactionHash: string) { const result = await this.verifier.verify(transactionHash, request, this.wallet.address, this.config.issuer); return result.validated ? result.ledgerResult === 'tesSUCCESS' ? 'SUCCEEDED' as const : 'FAILED' as const : 'UNKNOWN' as const }
+  async reconcile(request: ApprovedPaymentRequest, transactionHash: string) { return this.getStatus(request, transactionHash) }
 }
 
-export class SimulatedPaymentExecutor implements PaymentExecutor {
+export class SimulatedPaymentExecutor implements PaymentProvider {
   readonly mode = 'SIMULATED' as const
+  readonly providerId = 'xrpl-testnet'
+  readonly displayName = 'XRPL Simulation'
+  readonly supportedCurrencies = ['RLUSD'] as const
+  readonly supportedActions = ['purchase_storage'] as const
   calls = 0
 
   async execute(request: ApprovedPaymentRequest): Promise<ExecutionResult> {
@@ -198,6 +219,9 @@ export class SimulatedPaymentExecutor implements PaymentExecutor {
       timestamp: new Date().toISOString(),
     }
   }
+  async authorize(request: ApprovedPaymentRequest) { return request }
+  async getStatus() { return 'SUCCEEDED' as const }
+  async reconcile() { return 'SUCCEEDED' as const }
 }
 
 function normalizeCurrency(currency: string): string {

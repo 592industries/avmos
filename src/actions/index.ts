@@ -10,6 +10,7 @@ import { OperationsOrchestrator } from '../operations/orchestrator'
 import { OptionalResearchProvider, TavilyResearchProvider } from '../research/tavily'
 import { DemoTelemetryAdapter } from '../telemetry/demo'
 import { NewRelicTelemetryAdapter } from '../telemetry/newrelic'
+import { StoredTelemetrySource } from '../telemetry/stored'
 import {
   SimulatedPaymentExecutor,
   TrustLineManager,
@@ -59,11 +60,7 @@ export async function executeAgentCycle(tools: ActionTools, env: Env, mode: Cycl
   try {
   const policy = await resolvePolicy(tools, env, demo)
   const destinations = { 'approved-storage-vendor': env.XRPL_VENDOR_DESTINATION }
-  const telemetry = demo ? new DemoTelemetryAdapter() : new NewRelicTelemetryAdapter({
-    userKey: env.NEW_RELIC_USER_KEY!, accountId: Number(env.NEW_RELIC_ACCOUNT_ID),
-    entityGuid: env.NEW_RELIC_ENTITY_GUID!, region: (env.NEW_RELIC_REGION ?? 'US') as 'US' | 'EU' | 'JP',
-    resourceId,
-  })
+  const telemetry = demo ? new DemoTelemetryAdapter() : new StoredTelemetrySource(tools)
   const model = demo ? new DemoAgentModel(mode === 'demo-denied') : new GrokAgentModel({
     apiKey: env.GROK_API_KEY!, model: env.GROK_MODEL, baseUrl: env.GROK_BASE_URL,
   })
@@ -181,6 +178,8 @@ const reconcileXrplOperation: ActionHandler<Env> = async ({ userId, params, tool
     currency: 'RLUSD' as const,
     policyVersion: action.policyDecision.policyVersion,
     policyApprovedAt: action.policyDecision.timestamp,
+    providerId: action.providerId ?? 'xrpl-testnet',
+    authorizationScope: 'infrastructure:purchase',
   }
   try {
     const client = new XrplClient(env.XRPL_TESTNET_URL)

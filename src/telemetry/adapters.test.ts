@@ -1,42 +1,13 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { OptionalResearchProvider, type ResearchProvider } from '../research/tavily'
+import { afterEach,describe,expect,it,vi } from 'vitest'
+import { OptionalResearchProvider,type ResearchProvider } from '../research/tavily'
 import { NewRelicTelemetryAdapter } from './newrelic'
-
-afterEach(() => vi.unstubAllGlobals())
-
-const config = { userKey: 'user-key', accountId: 123, entityGuid: 'ENTITY', region: 'US' as const, resourceId: 'avmos' }
-
-describe('New Relic telemetry', () => {
-  it('normalizes current and historical data from the fixed NerdGraph endpoint', async () => {
-    const now = Date.now()
-    const fetchMock = vi.fn<typeof fetch>()
-      .mockResolvedValueOnce(Response.json({ data: { actor: { account: { nrql: { results: [{ utilization: 91, observedAt: now, hostname: 'avmos' }] } } } } }))
-      .mockResolvedValueOnce(Response.json({ data: { actor: { account: { nrql: { results: [{ utilization: 89, beginTimeSeconds: Math.floor(now / 1000) - 3600 }, { utilization: 91, beginTimeSeconds: Math.floor(now / 1000) }] } } } } }))
-    vi.stubGlobal('fetch', fetchMock)
-    const adapter = new NewRelicTelemetryAdapter(config)
-    expect(await adapter.getResource('avmos')).toMatchObject({ source: 'newrelic', telemetryStatus: 'LIVE', metrics: { storageUtilization: 91 } })
-    expect((await adapter.getStorageTrend('avmos')).points.map((point) => point.value)).toEqual([89, 91])
-    expect(fetchMock.mock.calls[0][0]).toBe('https://api.newrelic.com/graphql')
-  })
-
-  it('fails when the host has no samples', async () => {
-    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(Response.json({ data: { actor: { account: { nrql: { results: [] } } } } })))
-    await expect(new NewRelicTelemetryAdapter(config).getResource('avmos')).rejects.toThrow('not reporting')
-  })
-
-  it('rejects an absent metric instead of displaying zero percent', async () => {
-    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(Response.json({ data: { actor: { account: { nrql: { results: [{ utilization: null, observedAt: Date.now() }] } } } } })))
-    await expect(new NewRelicTelemetryAdapter(config).getResource('avmos')).rejects.toThrow('invalid storage utilization')
-  })
-
-  it('rejects stale historical evidence', async () => {
-    const old = Math.floor(Date.now() / 1000) - 86_400
-    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(Response.json({ data: { actor: { account: { nrql: { results: [{ utilization: 82, beginTimeSeconds: old - 3600 }, { utilization: 85, beginTimeSeconds: old }] } } } } })))
-    await expect(new NewRelicTelemetryAdapter(config).getStorageTrend('avmos')).rejects.toThrow('trend is stale')
-  })
-
-  it('keeps Tavily failure optional', async () => {
-    const unavailable: ResearchProvider = { search: async () => { throw new Error('offline') } }
-    await expect(new OptionalResearchProvider(unavailable).search('storage docs')).resolves.toMatchObject({ status: 'RESEARCH_FAILED', query: 'storage docs', sources: [] })
-  })
+afterEach(()=>vi.unstubAllGlobals())
+const config={userKey:'user-key',accountId:123,entityGuid:'ENTITY',region:'US' as const,resourceId:'avmos'}
+const response=(results:unknown[])=>Response.json({data:{actor:{account:{nrql:{results}}}}})
+describe('New Relic telemetry',()=>{
+  it('normalizes CPU, memory, storage, and network from fixed NerdGraph endpoints',async()=>{const now=Date.now();const fetchMock=vi.fn<typeof fetch>().mockResolvedValueOnce(response([{cpu:22,memory:61,observedAt:now,hostname:'avmos'}])).mockResolvedValueOnce(response([{utilization:81,totalBytes:1000,usedBytes:810,observedAt:now,hostname:'avmos',facet:'/'}])).mockResolvedValueOnce(response([{received:100,transmitted:50,observedAt:now,facet:'eth0'}]));vi.stubGlobal('fetch',fetchMock);const snapshot=await new NewRelicTelemetryAdapter(config).getSnapshot('avmos');expect(snapshot.resource).toMatchObject({source:'newrelic',telemetryStatus:'LIVE',metrics:{cpuUtilization:22,memoryUtilization:61,storageUtilization:81,networkReceiveBytesPerSecond:100}});expect(snapshot.observations).toHaveLength(5);expect(fetchMock.mock.calls.every(call=>call[0]==='https://api.newrelic.com/graphql')).toBe(true)})
+  it('marks missing metrics unavailable instead of displaying zero',async()=>{vi.stubGlobal('fetch',vi.fn<typeof fetch>().mockImplementation(async()=>response([])));const snapshot=await new NewRelicTelemetryAdapter(config).getSnapshot('avmos');expect(snapshot.observations.every(item=>item.status==='UNAVAILABLE')).toBe(true);expect(snapshot.resource.metrics).not.toHaveProperty('storageUtilization');expect(snapshot.resource.status).toBe('unknown')})
+  it('marks a failed provider query as error while retaining successful metric groups',async()=>{const now=Date.now();const fetchMock=vi.fn<typeof fetch>().mockResolvedValueOnce(response([{cpu:22,memory:61,observedAt:now}])).mockRejectedValueOnce(new Error('storage request failed')).mockResolvedValueOnce(response([{received:100,transmitted:50,observedAt:now}]));vi.stubGlobal('fetch',fetchMock);const snapshot=await new NewRelicTelemetryAdapter(config).getSnapshot('avmos');expect(snapshot.observations.filter(item=>item.metric==='storage_utilization')).toEqual([expect.objectContaining({status:'ERROR'})]);expect(snapshot.observations.filter(item=>item.metric==='cpu_utilization')).toEqual([expect.objectContaining({status:'LIVE'})])})
+  it('marks stale samples without turning them healthy',async()=>{const old=Date.now()-180_000;vi.stubGlobal('fetch',vi.fn<typeof fetch>().mockImplementation(async()=>response([{cpu:5,memory:5,utilization:5,received:1,transmitted:1,observedAt:old}])));const snapshot=await new NewRelicTelemetryAdapter(config).getSnapshot('avmos');expect(snapshot.observations.some(item=>item.status==='STALE')).toBe(true);expect(snapshot.resource.status).toBe('warning')})
+  it('keeps Tavily failure optional',async()=>{const unavailable:ResearchProvider={search:async()=>{throw new Error('offline')}};await expect(new OptionalResearchProvider(unavailable).search('storage docs')).resolves.toMatchObject({status:'RESEARCH_FAILED',sources:[]})})
 })

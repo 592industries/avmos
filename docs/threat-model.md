@@ -10,3 +10,5 @@
 | Wrong network, destination, or asset | XRPL executor | Exact Testnet URL, protected destination mapping, classic address check, RLUSD check, and ledger field verification. Test deceptive URLs and mismatched destinations. |
 | Unknown payment state or audit write failure | Executor and audit | Preserve `UNKNOWN` reservation and transaction hash when known; never auto retry. Test submit timeout and audit failure after success. |
 | DeepSpace authorization bypass | Worker and RecordRoom | Explicit action allowlist, role checks before elevated tools, authenticated WebSockets, read-only assistant. Test unauthorized actions and subscriptions. |
+| Unbounded telemetry growth | RecordRoom and CronRoom | Expiry fields, hourly bounded deletion, retention status records, deterministic observation IDs, and configurable limits. Test backlog and repeated cleanup. |
+| Private data on public routes | Browser provider boundary | Public homepage mounts no RecordProvider; operational pages mount records only behind AuthGate. Test that `/` opens no records WebSocket. |

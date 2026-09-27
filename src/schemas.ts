@@ -12,10 +12,17 @@ import { usersSchema } from './schemas/users-schema'
 import { settingsSchema } from './schemas/admin-schema'
 import {
   actionsSchema,
+  alertsSchema,
   agentsSchema,
   auditEventsSchema,
+  currentTelemetrySchema,
+  operationsLogSchema,
   policiesSchema,
+  policyDecisionsSchema,
   resourcesSchema,
+  retentionStatusSchema,
+  telemetryAggregatesSchema,
+  telemetryObservationsSchema,
 } from './schemas/operations-schema'
 
 export const schemas: CollectionSchema[] = [
@@ -23,7 +30,14 @@ export const schemas: CollectionSchema[] = [
   settingsSchema,
   agentsSchema,
   resourcesSchema,
+  currentTelemetrySchema,
+  telemetryObservationsSchema,
+  telemetryAggregatesSchema,
+  alertsSchema,
   policiesSchema,
+  policyDecisionsSchema,
   actionsSchema,
   auditEventsSchema,
+  operationsLogSchema,
+  retentionStatusSchema,
 ]

@@ -2,6 +2,7 @@ import type { Env } from '../../worker'
 import { DeepSpaceOperationsStore } from '../operations/deepspace-store'
 import { createActionTools } from '../server/action-routes'
 import { NewRelicTelemetryAdapter } from './newrelic'
+import { logOperation } from './retention'
 
 /** One CronRoom schedule feeds the shared RecordRoom; browsers never call New Relic. */
 export async function pollInfrastructure(env: Env): Promise<void> {
@@ -27,21 +28,12 @@ export async function pollInfrastructure(env: Env): Promise<void> {
       region: (env.NEW_RELIC_REGION ?? 'US') as 'US' | 'EU' | 'JP',
       resourceId,
     })
-    const signal = AbortSignal.timeout(20_000)
-    const resource = await adapter.getResource(resourceId, signal)
-    let trend: Awaited<ReturnType<NewRelicTelemetryAdapter['getStorageTrend']>> | undefined
-    let trendStatus: 'LIVE' | 'UNAVAILABLE' | 'ERROR' = 'LIVE'
-    let trendError: string | undefined
-    try {
-      trend = await adapter.getStorageTrend(resourceId, signal)
-    } catch (error) {
-      trendError = error instanceof Error ? error.message : String(error)
-      trendStatus = /insufficient historical|trend is stale/i.test(trendError) ? 'UNAVAILABLE' : 'ERROR'
-    }
-    await store.recordResource(resource, trend, trendStatus, trendError)
+    const snapshot = await adapter.getSnapshot(resourceId, AbortSignal.timeout(20_000))
+    await store.recordTelemetrySnapshot(snapshot.resource, snapshot.observations)
+    await logOperation(tools, env, 'poll-infrastructure', 'SUCCESS', `Stored ${snapshot.observations.length} New Relic observations.`)
   } catch (error) {
     await store.recordTelemetryFailure(resourceId, 'ERROR')
-    throw error
+    await logOperation(tools, env, 'poll-infrastructure', 'ERROR', error instanceof Error ? error.message : String(error))
   } finally {
     await lease('release')
   }
